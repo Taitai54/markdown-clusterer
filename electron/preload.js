@@ -18,5 +18,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Organization
   organizeFiles: (outputFolder, clusters, files) => 
-    ipcRenderer.invoke('organize-files', outputFolder, clusters, files)
+    ipcRenderer.invoke('organize-files', outputFolder, clusters, files),
+  
+  // Logging & Debugging
+  getLogPath: () => ipcRenderer.invoke('get-log-path'),
+  getLogs: (lines) => ipcRenderer.invoke('get-logs', lines),
+  openLogFolder: () => ipcRenderer.invoke('open-log-folder')
 });
