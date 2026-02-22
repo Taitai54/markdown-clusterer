@@ -77,7 +77,28 @@ function App() {
     if (folderPath) {
       const result = await window.electronAPI.readFolder(folderPath);
       if (result.success) {
-        setFiles(result.files);
+        setFiles(prev => {
+          const existingPaths = new Set(prev.map(f => f.path));
+          const newFiles = result.files.filter(f => !existingPaths.has(f.path));
+          return [...prev, ...newFiles];
+        });
+        setClusters([]);
+        setOrganized(false);
+      } else {
+        setError(result.error);
+      }
+    }
+  };
+
+  const handleProcessPaths = async (paths) => {
+    if (paths.length > 0) {
+      const result = await window.electronAPI.processPaths(paths);
+      if (result.success) {
+        setFiles(prev => {
+          const existingPaths = new Set(prev.map(f => f.path));
+          const newFiles = result.files.filter(f => !existingPaths.has(f.path));
+          return [...prev, ...newFiles];
+        });
         setClusters([]);
         setOrganized(false);
       } else {
@@ -229,6 +250,7 @@ function App() {
           <FileDropZone 
             onSelectFolder={handleSelectFolder}
             onSelectFiles={handleSelectFiles}
+            onDropPaths={handleProcessPaths}
           />
         ) : clusters.length === 0 ? (
           <div className="h-full flex flex-col">

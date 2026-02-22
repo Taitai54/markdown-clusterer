@@ -170,31 +170,73 @@ ipcMain.handle('select-files', async () => {
   }
 });
 
-// Read markdown files from a folder
-ipcMain.handle('read-folder', async (event, folderPath) => {
-  logger.info('Reading folder', { path: folderPath });
+// Helper for recursive markdown reading
+function readMarkdownFilesRecursive(folderPath, fileArray = []) {
   try {
-    const files = [];
     const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-    
     for (const entry of entries) {
-      if (entry.isFile() && /\.(md|markdown|txt)$/i.test(entry.name)) {
-        const filePath = path.join(folderPath, entry.name);
+      const fullPath = path.join(folderPath, entry.name);
+      if (entry.isDirectory()) {
+        readMarkdownFilesRecursive(fullPath, fileArray);
+      } else if (entry.isFile() && /\.(md|markdown|txt)$/i.test(entry.name)) {
         try {
-          const content = fs.readFileSync(filePath, 'utf-8');
-          const stats = fs.statSync(filePath);
-          files.push({
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          const stats = fs.statSync(fullPath);
+          fileArray.push({
             name: entry.name,
-            path: filePath,
+            path: fullPath,
             content: content,
             size: stats.size,
             modified: stats.mtime
           });
         } catch (fileError) {
-          logger.warn('Failed to read file', { file: filePath, error: fileError.message });
+          logger.warn('Failed to read file', { file: fullPath, error: fileError.message });
         }
       }
     }
+  } catch (err) {
+    logger.warn('Failed to read directory', { path: folderPath, error: err.message });
+  }
+  return fileArray;
+}
+
+// Process mixed files and folders from drag and drop
+ipcMain.handle('process-paths', async (event, paths) => {
+  logger.info('Processing mixed paths', { count: paths.length });
+  try {
+    const files = [];
+    for (const p of paths) {
+      try {
+        const stats = fs.statSync(p);
+        if (stats.isDirectory()) {
+          readMarkdownFilesRecursive(p, files);
+        } else if (stats.isFile() && /\.(md|markdown|txt)$/i.test(path.basename(p))) {
+          const content = fs.readFileSync(p, 'utf-8');
+          files.push({
+            name: path.basename(p),
+            path: p,
+            content: content,
+            size: stats.size,
+            modified: stats.mtime
+          });
+        }
+      } catch (err) {
+        logger.warn('Failed to process path', { path: p, error: err.message });
+      }
+    }
+    logger.info('Paths processed', { filesFound: files.length });
+    return { success: true, files };
+  } catch (error) {
+    logger.error('Error processing paths', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Read markdown files from a folder
+ipcMain.handle('read-folder', async (event, folderPath) => {
+  logger.info('Reading folder', { path: folderPath });
+  try {
+    const files = readMarkdownFilesRecursive(folderPath);
     logger.info('Folder read complete', { filesFound: files.length });
     return { success: true, files };
   } catch (error) {

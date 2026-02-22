@@ -16,8 +16,16 @@ function FileDropZone({ onSelectFolder, onSelectFiles }) {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-    // Note: In Electron, we'd need to handle dropped files via IPC
-    // For now, we'll just trigger the file selector
+    
+    if (e.dataTransfer && e.dataTransfer.files) {
+      const paths = Array.from(e.dataTransfer.files).map(f => f.path).filter(Boolean);
+      if (paths.length > 0 && typeof onDropPaths === 'function') {
+        onDropPaths(paths);
+        return;
+      }
+    }
+    
+    // Fallback if no valid paths or onDropPaths is not provided
     onSelectFiles();
   };
 

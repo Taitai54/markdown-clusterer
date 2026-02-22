@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File reading
   readFolder: (folderPath) => ipcRenderer.invoke('read-folder', folderPath),
   readFiles: (filePaths) => ipcRenderer.invoke('read-files', filePaths),
+  processPaths: (paths) => ipcRenderer.invoke('process-paths', paths),
   
   // Clustering
   clusterFiles: (files, numClusters) => ipcRenderer.invoke('cluster-files', files, numClusters),
