@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // API Key management
-  setApiKey: (apiKey) => ipcRenderer.invoke('set-api-key', apiKey),
+  setApiKey: (apiKey, baseURL) => ipcRenderer.invoke('set-api-key', apiKey, baseURL),
+  checkEnvApiKey: () => ipcRenderer.invoke('check-env-api-key'),
   
   // File/Folder selection
   selectFolder: () => ipcRenderer.invoke('select-folder'),
@@ -15,10 +16,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Clustering
   clusterFiles: (files, numClusters) => ipcRenderer.invoke('cluster-files', files, numClusters),
   suggestClusters: (fileCount) => ipcRenderer.invoke('suggest-clusters', fileCount),
+  onProgress: (callback) => ipcRenderer.on('clustering-progress', callback),
+  removeProgressListener: () => ipcRenderer.removeAllListeners('clustering-progress'),
   
   // Organization
-  organizeFiles: (outputFolder, clusters, files) => 
-    ipcRenderer.invoke('organize-files', outputFolder, clusters, files),
+  organizeFiles: (outputFolder, clusters, files, options) => 
+    ipcRenderer.invoke('organize-files', outputFolder, clusters, files, options),
   
   // Logging & Debugging
   getLogPath: () => ipcRenderer.invoke('get-log-path'),

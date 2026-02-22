@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+require('dotenv').config();
 const OpenAI = require('openai');
+const YAML = require('yaml');
 
 let mainWindow;
 let openaiClient = null;
@@ -36,7 +38,6 @@ function createWindow() {
   // Load the app
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
     logger.info('Running in development mode');
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
@@ -80,7 +81,7 @@ process.on('uncaughtException', (error) => {
   }
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   if (logger) {
     logger.error('Unhandled promise rejection', { reason: String(reason) });
   } else {
@@ -90,11 +91,35 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // IPC Handlers
 
+// Check environment API Key
+ipcMain.handle('check-env-api-key', async () => {
+  logger.info('Checking environment for API key');
+  const envKey = process.env.OPENAI_API_KEY;
+  if (envKey) {
+    try {
+      openaiClient = new OpenAI({ apiKey: envKey });
+      // Test the key
+      await openaiClient.models.list();
+      logger.info('Environment API key validated successfully');
+      return { success: true };
+    } catch (error) {
+      logger.error('Failed to validate environment API key', error);
+      openaiClient = null;
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: 'No OPENAI_API_KEY in environment' };
+});
+
 // Set OpenAI API Key
-ipcMain.handle('set-api-key', async (event, apiKey) => {
+ipcMain.handle('set-api-key', async (event, apiKey, baseURL) => {
   logger.info('Setting OpenAI API key');
   try {
-    openaiClient = new OpenAI({ apiKey });
+    const config = { apiKey };
+    if (baseURL) {
+      config.baseURL = baseURL;
+    }
+    openaiClient = new OpenAI(config);
     // Test the key with a simple request
     await openaiClient.models.list();
     logger.info('OpenAI API key validated successfully');
@@ -212,58 +237,125 @@ ipcMain.handle('cluster-files', async (event, files, numClusters) => {
   
   if (!openaiClient) {
     logger.error('Clustering attempted without API key');
-    return { success: false, error: 'OpenAI API key not set' };
+    return { success: false, error: 'API configuration not set' };
   }
 
+  const reportProgress = (msg) => {
+    logger.info(`Clustering progress: ${msg}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clustering-progress', msg);
+    }
+  };
+
   try {
-    // Prepare file summaries for clustering
-    const fileSummaries = files.map((f, idx) => {
-      // Take first 1500 chars of content for analysis
-      const preview = f.content.substring(0, 1500);
-      return `[File ${idx + 1}] "${f.name}"\nContent preview:\n${preview}\n---`;
-    }).join('\n\n');
+    reportProgress(`Generating embeddings for ${files.length} files...`);
+    
+    // 1. Generate Embeddings for all files
+    // Generate Embeddings
+    const embeddings = [];
+    const maxRetries = 3;
 
-    const prompt = `You are an expert at organizing and categorizing documents. I have ${files.length} markdown files that are transcripts (mainly from YouTube videos). Please analyze them and group them into ${numClusters} logical clusters based on their topics and themes.
+    for (let i = 0; i < files.length; i += 100) {
+      const batch = files.slice(i, i + 100);
+      const texts = batch.map(f => f.content.substring(0, 1500)); // Still use preview for embedding to save some tokens/time if files are huge
+      
+      let attempt = 0;
+      let batchEmbeddings = null;
 
-Here are the files:
+      while (attempt < maxRetries && !batchEmbeddings) {
+        try {
+          const response = await openaiClient.embeddings.create({
+            model: "text-embedding-3-small",
+            input: texts,
+          });
+          batchEmbeddings = response.data.map(d => d.embedding);
+        } catch (error) {
+          attempt++;
+          if (attempt >= maxRetries) throw error;
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt))); // Exponential backoff
+        }
+      }
+      embeddings.push(...batchEmbeddings);
+      
+      // Progress calculation
+      Math.min(50, Math.round(((i + batch.length) / files.length) * 50));
+      event.sender.send('clustering-progress', `Generated embeddings for ${i + batch.length}/${files.length} files...`);
+    }
 
+    event.sender.send('clustering-progress', `Running K-Means clustering...`);
+    
+    // Dynamically import ml-kmeans because it's an ES module
+    const mlKmeans = await import('ml-kmeans');
+    const { kmeans } = mlKmeans;
+    
+    // Perform K-Means clustering
+    // The result object has a 'clusters' array where each element is the assigned cluster index (0 to numClusters - 1)
+    const result = kmeans(embeddings, numClusters, { initialization: 'kmeans++' });
+    const clusterLabels = result.clusters; // Array of cluster indices
+
+    // 3. Group files by cluster
+    const clusterGroups = Array.from({ length: numClusters }, () => []);
+    for (let i = 0; i < files.length; i++) {
+        clusterGroups[clusterLabels[i]].push(i);
+    }
+
+    // 4. Name the clusters using LLM
+    const finalClusters = [];
+    for (let i = 0; i < numClusters; i++) {
+      const fileIndices = clusterGroups[i];
+      if (fileIndices.length === 0) continue;
+
+      reportProgress(`Generating name for Cluster ${i + 1} of ${numClusters}...`);
+      
+      // Sample up to 5 files
+      const sampleIndices = fileIndices.slice(0, 5);
+      const fileSummaries = sampleIndices.map(idx => {
+        const preview = files[idx].content.substring(0, 1000);
+        return `[File ${idx}] "${files[idx].name}"\nContent preview:\n${preview}\n---`;
+      }).join('\n\n');
+
+      const prompt = `You are categorizing documents. I have grouped several files into a cluster using an algorithm.
+Based on the following file summaries, provide a short, descriptive name for this cluster and a brief description.
+
+Files:
 ${fileSummaries}
 
-Please respond with a JSON object in this exact format:
+Respond with a JSON object in this exact format:
 {
-  "clusters": [
-    {
-      "name": "Cluster Name (short, descriptive)",
-      "description": "Brief description of what this cluster contains",
-      "fileIndices": [0, 2, 5]
+  "name": "Cluster Name (short, descriptive)",
+  "description": "Brief description of what this cluster contains"
+}`;
+
+      try {
+        const response = await openaiClient.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          response_format: { type: 'json_object' }
+        });
+        
+        const clusterInfo = JSON.parse(response.choices[0].message.content);
+        
+        finalClusters.push({
+          name: clusterInfo.name,
+          description: clusterInfo.description,
+          fileIndices: fileIndices
+        });
+      } catch (err) {
+        logger.error(`Failed to name cluster ${i}`, err);
+        finalClusters.push({
+          name: `Cluster ${i + 1}`,
+          description: "Auto-generated cluster",
+          fileIndices: fileIndices
+        });
+      }
     }
-  ]
-}
-
-The fileIndices should be 0-based indices referring to the files in the order provided (File 1 = index 0, File 2 = index 1, etc.).
-Make sure every file is assigned to exactly one cluster.
-Choose meaningful, descriptive cluster names that would work well as folder names.`;
-
-    logger.debug('Sending request to OpenAI', { 
-      model: 'gpt-4o-mini',
-      promptLength: prompt.length 
-    });
-
-    const response = await openaiClient.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      response_format: { type: 'json_object' }
-    });
-
-    const result = JSON.parse(response.choices[0].message.content);
     
     logger.info('AI clustering complete', { 
-      clustersCreated: result.clusters.length,
-      usage: response.usage
+      clustersCreated: finalClusters.length 
     });
     
-    return { success: true, clusters: result.clusters };
+    return { success: true, clusters: finalClusters };
   } catch (error) {
     logger.error('AI clustering failed', error);
     return { success: false, error: error.message };
@@ -271,16 +363,62 @@ Choose meaningful, descriptive cluster names that would work well as folder name
 });
 
 // Move files to cluster folders
-ipcMain.handle('organize-files', async (event, outputFolder, clusters, files) => {
+ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, options = {}) => {
+  const { mode = 'copy', injectTags = false } = options;
+  
   logger.info('Organizing files', { 
     outputFolder, 
     clusterCount: clusters.length,
-    fileCount: files.length 
+    fileCount: files.length,
+    mode,
+    injectTags
   });
   
   try {
     const results = [];
     const errors = [];
+    
+    // Helper function for collision-free names
+    const getCollisionFreePath = (filepath) => {
+      if (!fs.existsSync(filepath)) return filepath;
+      const parsed = path.parse(filepath);
+      let counter = 1;
+      let newPath = path.join(parsed.dir, `${parsed.name} (${counter})${parsed.ext}`);
+      while (fs.existsSync(newPath)) {
+        counter++;
+        newPath = path.join(parsed.dir, `${parsed.name} (${counter})${parsed.ext}`);
+      }
+      return newPath;
+    };
+
+    // Helper function to inject metadata into Markdown frontmatter
+    const injectFrontmatter = (content, tags) => {
+      // Regex to match existing YAML frontmatter
+      const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---/;
+      let newContent = content;
+      let existingFm = {};
+
+      const match = content.match(fmRegex);
+      if (match) {
+        try {
+          existingFm = YAML.parse(match[1]) || {};
+          newContent = content.substring(match[0].length).trim();
+        } catch (e) {
+          logger.warn('Failed to parse existing frontmatter', e);
+        }
+      }
+
+      // Add tag to frontmatter
+      existingFm.tags = Array.isArray(existingFm.tags) ? existingFm.tags : (existingFm.tags ? [existingFm.tags] : []);
+      for (const tag of tags) {
+        if (!existingFm.tags.includes(tag)) {
+          existingFm.tags.push(tag);
+        }
+      }
+
+      const newFmString = YAML.stringify(existingFm);
+      return `---\n${newFmString}---\n${newContent}`;
+    };
     
     for (const cluster of clusters) {
       // Create cluster folder
@@ -297,22 +435,36 @@ ipcMain.handle('organize-files', async (event, outputFolder, clusters, files) =>
         continue;
       }
       
-      // Copy files to cluster folder
+      // Copy or move files to cluster folder
       for (const fileIndex of cluster.fileIndices) {
         const file = files[fileIndex];
         if (file) {
-          const destPath = path.join(clusterFolder, file.name);
+          const destPath = getCollisionFreePath(path.join(clusterFolder, file.name));
           try {
-            fs.copyFileSync(file.path, destPath);
+            if (injectTags && /\.(md|markdown)$/i.test(file.name)) {
+              const fileContent = fs.readFileSync(file.path, 'utf8');
+              const newContent = injectFrontmatter(fileContent, [cluster.name]);
+              fs.writeFileSync(destPath, newContent, 'utf8');
+              if (mode === 'move') {
+                fs.unlinkSync(file.path);
+              }
+            } else {
+              if (mode === 'move') {
+                fs.renameSync(file.path, destPath);
+              } else {
+                fs.copyFileSync(file.path, destPath);
+              }
+            }
+            
             results.push({
               source: file.path,
               destination: destPath,
               cluster: cluster.name
             });
-            logger.debug('File copied', { source: file.path, destination: destPath });
-          } catch (copyError) {
-            logger.error('Failed to copy file', { source: file.path, destination: destPath, error: copyError });
-            errors.push({ type: 'copy', source: file.path, destination: destPath, error: copyError.message });
+            logger.debug(`File ${mode === 'move' ? 'moved' : 'copied'}`, { source: file.path, destination: destPath });
+          } catch (fileError) {
+            logger.error(`Failed to ${mode} file`, { source: file.path, destination: destPath, error: fileError });
+            errors.push({ type: mode, source: file.path, destination: destPath, error: fileError.message });
           }
         }
       }

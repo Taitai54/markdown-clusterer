@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 function ApiKeyModal({ onSubmit, onClose, error, isSet }) {
   const [apiKey, setApiKey] = useState('');
+  const [baseURL, setBaseURL] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -9,7 +10,7 @@ function ApiKeyModal({ onSubmit, onClose, error, isSet }) {
     if (!apiKey.trim()) return;
     
     setLoading(true);
-    await onSubmit(apiKey.trim());
+    await onSubmit(apiKey.trim(), baseURL.trim());
     setLoading(false);
   };
 
@@ -32,9 +33,16 @@ function ApiKeyModal({ onSubmit, onClose, error, isSet }) {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              className="w-full px-4 py-3 bg-dark-200 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 transition-colors"
+              placeholder="OpenAI API Key (sk-...)"
+              className="w-full px-4 py-3 mb-3 bg-dark-200 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 transition-colors"
               autoFocus
+            />
+            <input
+              type="text"
+              value={baseURL}
+              onChange={(e) => setBaseURL(e.target.value)}
+              placeholder="Base URL (Optional, e.g., http://localhost:11434/v1 for Ollama)"
+              className="w-full px-4 py-3 bg-dark-200 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 transition-colors"
             />
           </div>
 

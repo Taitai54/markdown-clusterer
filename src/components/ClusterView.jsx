@@ -5,6 +5,10 @@ function ClusterView({
   files, 
   outputFolder, 
   organized,
+  orgMode,
+  setOrgMode,
+  injectTags,
+  setInjectTags,
   onSelectOutputFolder, 
   onOrganize,
   onMoveFile,
@@ -15,6 +19,7 @@ function ClusterView({
   const [dragOverCluster, setDragOverCluster] = useState(null);
   const [editingCluster, setEditingCluster] = useState(null);
   const [editName, setEditName] = useState('');
+  const [selectedFileIndex, setSelectedFileIndex] = useState(null);
 
   const handleDragStart = (fileIndex, clusterIndex) => {
     setDraggedFile({ fileIndex, clusterIndex });
@@ -66,7 +71,7 @@ function ClusterView({
   return (
     <div className="h-full flex flex-col">
       {/* Action Bar */}
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+      <div className="flex flex-wrap items-center justify-between mb-4 flex-shrink-0 gap-4">
         <div className="flex items-center gap-4">
           <button
             onClick={onRecluster}
@@ -77,6 +82,41 @@ function ClusterView({
           <span className="text-gray-400">
             {clusters.length} clusters created
           </span>
+        </div>
+
+        <div className="flex items-center gap-4 bg-dark-200 p-2 rounded-lg border border-gray-700">
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input 
+              type="radio" 
+              name="orgMode" 
+              value="copy" 
+              checked={orgMode === 'copy'} 
+              onChange={() => setOrgMode('copy')} 
+              className="text-primary-500 bg-dark-100 border-gray-600 focus:ring-primary-600"
+            />
+            Copy
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input 
+              type="radio" 
+              name="orgMode" 
+              value="move" 
+              checked={orgMode === 'move'} 
+              onChange={() => setOrgMode('move')} 
+              className="text-primary-500 bg-dark-100 border-gray-600 focus:ring-primary-600"
+            />
+            Move
+          </label>
+          <div className="w-px h-4 bg-gray-600 mx-1"></div>
+          <label className="flex items-center gap-2 cursor-pointer text-sm" title="Adds the cluster name to the file's YAML frontmatter as a tag">
+            <input 
+              type="checkbox" 
+              checked={injectTags} 
+              onChange={(e) => setInjectTags(e.target.checked)} 
+              className="rounded text-primary-500 bg-dark-100 border-gray-600 focus:ring-primary-600"
+            />
+            Inject Tags
+          </label>
         </div>
 
         <div className="flex items-center gap-4">
@@ -112,9 +152,11 @@ function ClusterView({
         💡 <strong>Tip:</strong> Drag files between clusters to reorganize. Click cluster names to rename them.
       </div>
 
-      {/* Clusters Grid */}
-      <div className="flex-1 overflow-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Split layout: Clusters and File Preview */}
+      <div className="flex-1 flex gap-4 min-h-0">
+        {/* Clusters Area */}
+        <div className="flex-[2] overflow-auto pr-2 custom-scrollbar">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {clusters.map((cluster, clusterIndex) => (
             <div
               key={clusterIndex}
@@ -167,7 +209,8 @@ function ClusterView({
                       key={fileIndex}
                       draggable
                       onDragStart={() => handleDragStart(fileIndex, clusterIndex)}
-                      className="bg-dark-200/50 rounded-lg p-2 cursor-move hover:bg-dark-200 transition-colors flex items-center gap-2"
+                      onClick={() => setSelectedFileIndex(fileIndex)}
+                      className={`bg-dark-200/50 rounded-lg p-2 cursor-move hover:bg-dark-200 transition-colors flex items-center gap-2 ${selectedFileIndex === fileIndex ? 'ring-2 ring-primary-500' : ''}`}
                     >
                       <span className="text-gray-500">📄</span>
                       <span className="text-sm text-gray-300 truncate" title={file.name}>
@@ -187,6 +230,26 @@ function ClusterView({
           ))}
         </div>
       </div>
+      
+      {/* File Preview Pane */}
+      <div className="flex-1 bg-dark-100 border border-gray-700 rounded-xl flex flex-col overflow-hidden min-w-[300px]">
+        {selectedFileIndex !== null && files[selectedFileIndex] ? (
+          <>
+            <div className="p-3 border-b border-gray-700 bg-dark-200/50 font-medium truncate flex-shrink-0" title={files[selectedFileIndex].name}>
+              📄 {files[selectedFileIndex].name}
+            </div>
+            <div className="p-4 flex-1 overflow-auto bg-dark-300 text-gray-300 text-sm font-mono whitespace-pre-wrap custom-scrollbar">
+              {files[selectedFileIndex].content}
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-500 p-6 text-center">
+            <span className="text-4xl mb-4">👁️</span>
+            <p>Click a file in any cluster to preview its contents here.</p>
+          </div>
+        )}
+      </div>
+    </div>
 
       {/* Success Message */}
       {organized && (

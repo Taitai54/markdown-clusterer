@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import ApiKeyModal from './components/ApiKeyModal';
 import FileDropZone from './components/FileDropZone';
 import FileList from './components/FileList';
@@ -17,6 +17,8 @@ function App() {
   const [outputFolder, setOutputFolder] = useState('');
   const [organized, setOrganized] = useState(false);
   const [error, setError] = useState('');
+  const [orgMode, setOrgMode] = useState('copy');
+  const [injectTags, setInjectTags] = useState(false);
 
   // Update suggested clusters when files change
   useEffect(() => {
@@ -25,9 +27,39 @@ function App() {
     }
   }, [files.length]);
 
-  const handleApiKeySubmit = async (apiKey) => {
+  // Check if API key is available via .env on startup
+  useEffect(() => {
+    const checkEnv = async () => {
+      if (window.electronAPI && window.electronAPI.checkEnvApiKey) {
+        const result = await window.electronAPI.checkEnvApiKey();
+        if (result.success) {
+          setApiKeySet(true);
+          setShowApiModal(false);
+        } else {
+          // If not in env, we could check localStorage, but assuming modal is the fallback
+        }
+      }
+    };
+    checkEnv();
+  }, []);
+
+  useEffect(() => {
+    if (window.electronAPI && window.electronAPI.onProgress) {
+      const handleProgress = (event, msg) => {
+        setProcessingStep(msg);
+      };
+      window.electronAPI.onProgress(handleProgress);
+      return () => {
+        if (window.electronAPI.removeProgressListener) {
+          window.electronAPI.removeProgressListener();
+        }
+      };
+    }
+  }, []);
+
+  const handleApiKeySubmit = async (apiKey, baseURL) => {
     try {
-      const result = await window.electronAPI.setApiKey(apiKey);
+      const result = await window.electronAPI.setApiKey(apiKey, baseURL);
       if (result.success) {
         setApiKeySet(true);
         setShowApiModal(false);
@@ -127,7 +159,7 @@ function App() {
     setError('');
 
     try {
-      const result = await window.electronAPI.organizeFiles(outputFolder, clusters, files);
+      const result = await window.electronAPI.organizeFiles(outputFolder, clusters, files, { mode: orgMode, injectTags });
       if (result.success) {
         setOrganized(true);
         setProcessingStep('');
@@ -249,6 +281,10 @@ function App() {
             files={files}
             outputFolder={outputFolder}
             organized={organized}
+            orgMode={orgMode}
+            setOrgMode={setOrgMode}
+            injectTags={injectTags}
+            setInjectTags={setInjectTags}
             onSelectOutputFolder={handleSelectOutputFolder}
             onOrganize={handleOrganize}
             onMoveFile={handleMoveFile}
