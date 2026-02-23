@@ -132,21 +132,23 @@ ipcMain.handle('set-api-key', async (event, apiKey, baseURL) => {
 });
 
 // Select folder dialog
-ipcMain.handle('select-folder', async () => {
+ipcMain.handle('select-folder', async (event, options = {}) => {
   logger.debug('Opening folder selection dialog');
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openDirectory']
-    });
+    const properties = ['openDirectory'];
+    if (options.multiSelections) {
+      properties.push('multiSelections');
+    }
+    const result = await dialog.showOpenDialog(mainWindow, { properties });
     if (result.canceled) {
       logger.debug('Folder selection canceled');
-      return null;
+      return options.multiSelections ? [] : null;
     }
-    logger.info('Folder selected', { path: result.filePaths[0] });
-    return result.filePaths[0];
+    logger.info('Folder(s) selected', { count: result.filePaths.length });
+    return options.multiSelections ? result.filePaths : result.filePaths[0];
   } catch (error) {
     logger.error('Error selecting folder', error);
-    return null;
+    return options.multiSelections ? [] : null;
   }
 });
 

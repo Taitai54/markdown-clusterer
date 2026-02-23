@@ -19,6 +19,7 @@ function App() {
   const [error, setError] = useState('');
   const [orgMode, setOrgMode] = useState('copy');
   const [injectTags, setInjectTags] = useState(false);
+  const [isGlobalDragging, setIsGlobalDragging] = useState(false);
 
   // Update suggested clusters when files change
   useEffect(() => {
@@ -73,20 +74,9 @@ function App() {
   };
 
   const handleSelectFolder = async () => {
-    const folderPath = await window.electronAPI.selectFolder();
-    if (folderPath) {
-      const result = await window.electronAPI.readFolder(folderPath);
-      if (result.success) {
-        setFiles(prev => {
-          const existingPaths = new Set(prev.map(f => f.path));
-          const newFiles = result.files.filter(f => !existingPaths.has(f.path));
-          return [...prev, ...newFiles];
-        });
-        setClusters([]);
-        setOrganized(false);
-      } else {
-        setError(result.error);
-      }
+    const folderPaths = await window.electronAPI.selectFolder();
+    if (folderPaths && folderPaths.length > 0) {
+      await handleProcessPaths(folderPaths);
     }
   };
 
@@ -109,19 +99,8 @@ function App() {
 
   const handleSelectFiles = async () => {
     const filePaths = await window.electronAPI.selectFiles();
-    if (filePaths.length > 0) {
-      const result = await window.electronAPI.readFiles(filePaths);
-      if (result.success) {
-        setFiles(prev => {
-          const existingPaths = new Set(prev.map(f => f.path));
-          const newFiles = result.files.filter(f => !existingPaths.has(f.path));
-          return [...prev, ...newFiles];
-        });
-        setClusters([]);
-        setOrganized(false);
-      } else {
-        setError(result.error);
-      }
+    if (filePaths && filePaths.length > 0) {
+      await handleProcessPaths(filePaths);
     }
   };
 
@@ -159,6 +138,24 @@ function App() {
       setError('Clustering failed: ' + err.message);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleGlobalDragOver = (e) => {
+    e.preventDefault();
+    if (!isGlobalDragging && files.length > 0) {
+      setIsGlobalDragging(true);
+    }
+  };
+
+  const handleGlobalDrop = (e) => {
+    e.preventDefault();
+    setIsGlobalDragging(false);
+    if (e.dataTransfer && e.dataTransfer.files) {
+      const paths = Array.from(e.dataTransfer.files).map(f => f.path).filter(Boolean);
+      if (paths.length > 0) {
+        handleProcessPaths(paths);
+      }
     }
   };
 
@@ -226,7 +223,25 @@ function App() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-dark-200">
+    <div 
+      className="h-screen flex flex-col bg-dark-200 relative"
+      onDragOver={handleGlobalDragOver}
+    >
+      {isGlobalDragging && (
+        <div 
+          className="absolute inset-0 z-50 bg-primary-500/20 border-4 border-primary-500 border-dashed m-2 rounded-xl flex items-center justify-center backdrop-blur-sm transition-all"
+          onDragLeave={() => setIsGlobalDragging(false)}
+          onDrop={handleGlobalDrop}
+          onDragOver={(e) => e.preventDefault()}
+        >
+          <div className="bg-dark-100 p-8 rounded-2xl shadow-2xl flex flex-col items-center gap-4 border border-primary-500/30">
+            <span className="text-6xl">📥</span>
+            <h2 className="text-2xl font-bold text-white">Drop markdown files and folders</h2>
+            <p className="text-gray-400">Add directly to your current session</p>
+          </div>
+        </div>
+      )}
+
       <Header 
         apiKeySet={apiKeySet} 
         onApiKeyClick={() => setShowApiModal(true)}
@@ -257,10 +272,16 @@ function App() {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={handleSelectFiles}
-                  className="px-4 py-2 bg-dark-100 hover:bg-dark-300 rounded-lg transition-colors"
+                  onClick={handleSelectFolder}
+                  className="px-4 py-2 bg-dark-100 hover:bg-dark-300 rounded-lg transition-colors border border-gray-600"
                 >
-                  + Add More Files
+                  + Add Folder
+                </button>
+                <button
+                  onClick={handleSelectFiles}
+                  className="px-4 py-2 bg-dark-100 hover:bg-dark-300 rounded-lg transition-colors border border-gray-600"
+                >
+                  + Add Files
                 </button>
                 <button
                   onClick={handleClearFiles}
