@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkEnvApiKey: () => ipcRenderer.invoke('check-env-api-key'),
   
   // File/Folder selection
-  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectFolder: () => ipcRenderer.invoke('select-folder', { multiSelections: true }),
   selectFiles: () => ipcRenderer.invoke('select-files'),
   
   // File reading
@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   processPaths: (paths) => ipcRenderer.invoke('process-paths', paths),
   
   // Clustering
-  clusterFiles: (files, numClusters) => ipcRenderer.invoke('cluster-files', files, numClusters),
+  clusterFiles: (files, numClusters, aiHint) => ipcRenderer.invoke('cluster-files', files, numClusters, aiHint),
   suggestClusters: (fileCount) => ipcRenderer.invoke('suggest-clusters', fileCount),
   onProgress: (callback) => ipcRenderer.on('clustering-progress', callback),
   removeProgressListener: () => ipcRenderer.removeAllListeners('clustering-progress'),

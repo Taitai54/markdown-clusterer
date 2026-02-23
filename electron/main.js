@@ -276,8 +276,8 @@ ipcMain.handle('read-files', async (event, filePaths) => {
 });
 
 // Cluster files using OpenAI
-ipcMain.handle('cluster-files', async (event, files, numClusters) => {
-  logger.info('Starting AI clustering', { fileCount: files.length, numClusters });
+ipcMain.handle('cluster-files', async (event, files, numClusters, aiHint) => {
+  logger.info('Starting AI clustering', { fileCount: files.length, numClusters, hasAiHint: !!aiHint });
   
   if (!openaiClient) {
     logger.error('Clustering attempted without API key');
@@ -363,7 +363,7 @@ Based on the following file summaries, provide a short, descriptive name for thi
 
 Files:
 ${fileSummaries}
-
+${aiHint ? `\nUser Instructions/Hint for Naming: ${aiHint}\n` : ''}
 Respond with a JSON object in this exact format:
 {
   "name": "Cluster Name (short, descriptive)",

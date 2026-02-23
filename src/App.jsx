@@ -20,6 +20,7 @@ function App() {
   const [orgMode, setOrgMode] = useState('copy');
   const [injectTags, setInjectTags] = useState(false);
   const [isGlobalDragging, setIsGlobalDragging] = useState(false);
+  const [aiHint, setAiHint] = useState('');
 
   // Update suggested clusters when files change
   useEffect(() => {
@@ -127,7 +128,7 @@ function App() {
     setError('');
 
     try {
-      const result = await window.electronAPI.clusterFiles(files, numClusters);
+      const result = await window.electronAPI.clusterFiles(files, numClusters, aiHint);
       if (result.success) {
         setClusters(result.clusters);
         setProcessingStep('');
@@ -162,7 +163,7 @@ function App() {
   const handleSelectOutputFolder = async () => {
     const folderPath = await window.electronAPI.selectFolder();
     if (folderPath) {
-      setOutputFolder(folderPath);
+      setOutputFolder(Array.isArray(folderPath) ? folderPath[0] : folderPath);
     }
   };
 
@@ -303,6 +304,13 @@ function App() {
                     className="w-16 px-2 py-1 bg-dark-100 border border-gray-600 rounded text-center"
                   />
                 </label>
+                <input
+                  type="text"
+                  placeholder="Optional: AI naming hint (e.g. 'Focus on Claude')"
+                  value={aiHint}
+                  onChange={(e) => setAiHint(e.target.value)}
+                  className="w-64 px-3 py-1 bg-dark-100 border border-gray-600 rounded text-white text-sm"
+                />
                 <button
                   onClick={handleCluster}
                   disabled={!apiKeySet || files.length < 2}
