@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // API Key management
   setApiKey: (apiKey, baseURL) => ipcRenderer.invoke('set-api-key', apiKey, baseURL),
   checkEnvApiKey: () => ipcRenderer.invoke('check-env-api-key'),
+  saveApiKey: (apiKey, baseURL) => ipcRenderer.invoke('save-api-key', apiKey, baseURL),
+  loadApiKey: () => ipcRenderer.invoke('load-api-key'),
+  deleteApiKey: () => ipcRenderer.invoke('delete-api-key'),
   
   // File/Folder selection
   selectFolder: () => ipcRenderer.invoke('select-folder', { multiSelections: true }),
@@ -17,12 +20,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Clustering
   clusterFiles: (files, numClusters, aiHint) => ipcRenderer.invoke('cluster-files', files, numClusters, aiHint),
   suggestClusters: (fileCount) => ipcRenderer.invoke('suggest-clusters', fileCount),
+  suggestK: (files) => ipcRenderer.invoke('suggest-k', files),
   onProgress: (callback) => ipcRenderer.on('clustering-progress', callback),
   removeProgressListener: () => ipcRenderer.removeAllListeners('clustering-progress'),
   
   // Organization
   organizeFiles: (outputFolder, clusters, files, options) => 
     ipcRenderer.invoke('organize-files', outputFolder, clusters, files, options),
+  readDedupManifest: (folderPath) => ipcRenderer.invoke('read-dedup-manifest', folderPath),
   
   // Logging & Debugging
   getLogPath: () => ipcRenderer.invoke('get-log-path'),

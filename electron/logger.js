@@ -8,7 +8,13 @@ class Logger {
     this.logDir = app ? app.getPath('userData') : path.join(__dirname, '../logs');
     this.logFile = path.join(this.logDir, 'markdown-clusterer.log');
     this.maxLogSize = 5 * 1024 * 1024; // 5MB max log size
+    this.levels = { debug: 0, info: 1, warn: 2, error: 3 };
+    this.minLevel = process.env.LOG_LEVEL || 'info';
     this.ensureLogDir();
+  }
+
+  shouldLog(level) {
+    return (this.levels[level] ?? 0) >= (this.levels[this.minLevel] ?? 0);
   }
 
   ensureLogDir() {
@@ -21,7 +27,7 @@ class Logger {
     }
   }
 
-  rotateLogIfNeeded() {
+  async rotateLogIfNeeded() {
     try {
       if (fs.existsSync(this.logFile)) {
         const stats = fs.statSync(this.logFile);
@@ -60,9 +66,11 @@ class Logger {
     return logEntry;
   }
 
-  write(level, message, data = null) {
+  async write(level, message, data = null) {
+    if (!this.shouldLog(level)) return;
+
     const logEntry = this.formatMessage(level, message, data);
-    
+
     // Always log to console
     if (level === 'error') {
       console.error(logEntry);
@@ -72,10 +80,10 @@ class Logger {
       console.log(logEntry);
     }
 
-    // Write to file
+    // Async file write
     try {
-      this.rotateLogIfNeeded();
-      fs.appendFileSync(this.logFile, logEntry + '\n\n');
+      await this.rotateLogIfNeeded();
+      await fs.promises.appendFile(this.logFile, logEntry + '\n\n');
     } catch (err) {
       console.error('Failed to write to log file:', err);
     }
@@ -94,9 +102,7 @@ class Logger {
   }
 
   debug(message, data = null) {
-    if (process.env.NODE_ENV === 'development' || !app?.isPackaged) {
-      this.write('debug', message, data);
-    }
+    this.write('debug', message, data);
   }
 
   getLogPath() {

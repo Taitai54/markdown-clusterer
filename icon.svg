@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="95" fill="#1a1a2e" stroke="#4a90e2" stroke-width="3"/>
+  
+  <!-- Books being pulled in (left side) -->
+  <g id="books-left">
+    <!-- Book 1 -->
+    <rect x="15" y="70" width="20" height="30" fill="#e74c3c" rx="2" opacity="0.8">
+      <animateTransform attributeName="transform" type="translate" 
+        values="0,0; 40,20; 0,0" dur="3s" repeatCount="indefinite"/>
+    </rect>
+    <line x1="17" y1="75" x2="17" y2="95" stroke="#c0392b" stroke-width="1"/>
+    
+    <!-- Book 2 -->
+    <rect x="20" y="45" width="18" height="28" fill="#3498db" rx="2" opacity="0.8">
+      <animateTransform attributeName="transform" type="translate" 
+        values="0,0; 45,30; 0,0" dur="3.5s" repeatCount="indefinite"/>
+    </rect>
+    <line x1="22" y1="50" x2="22" y2="70" stroke="#2980b9" stroke-width="1"/>
+    
+    <!-- Book 3 -->
+    <rect x="10" y="105" width="22" height="32" fill="#2ecc71" rx="2" opacity="0.8">
+      <animateTransform attributeName="transform" type="translate" 
+        values="0,0; 42,15; 0,0" dur="2.8s" repeatCount="indefinite"/>
+    </rect>
+    <line x1="12" y1="110" x2="12" y2="132" stroke="#27ae60" stroke-width="1"/>
+  </g>
+  
+  <!-- Books being pulled in (right side) -->
+  <g id="books-right">
+    <!-- Book 4 -->
+    <rect x="165" y="65" width="20" height="30" fill="#9b59b6" rx="2" opacity="0.8">
+      <animateTransform attributeName="transform" type="translate" 
+        values="0,0; -40,25; 0,0" dur="3.2s" repeatCount="indefinite"/>
+    </rect>
+    <line x1="167" y1="70" x2="167" y2="90" stroke="#8e44ad" stroke-width="1"/>
+    
+    <!-- Book 5 -->
+    <rect x="162" y="100" width="18" height="28" fill="#f39c12" rx="2" opacity="0.8">
+      <animateTransform attributeName="transform" type="translate" 
+        values="0,0; -45,18; 0,0" dur="2.9s" repeatCount="indefinite"/>
+    </rect>
+    <line x1="164" y1="105" x2="164" y2="125" stroke="#e67e22" stroke-width="1"/>
+    
+    <!-- Book 6 -->
+    <rect x="170" y="40" width="22" height="32" fill="#1abc9c" rx="2" opacity="0.8">
+      <animateTransform attributeName="transform" type="translate" 
+        values="0,0; -42,32; 0,0" dur="3.4s" repeatCount="indefinite"/>
+    </rect>
+    <line x1="172" y1="45" x2="172" y2="67" stroke="#16a085" stroke-width="1"/>
+  </g>
+  
+  <!-- Books from top -->
+  <g id="books-top">
+    <!-- Book 7 -->
+    <rect x="85" y="5" width="30" height="20" fill="#e67e22" rx="2" opacity="0.8">
+      <animateTransform attributeName="transform" type="translate" 
+        values="0,0; 5,50; 0,0" dur="3.1s" repeatCount="indefinite"/>
+    </rect>
+    <line x1="90" y1="7" x2="110" y2="7" stroke="#d35400" stroke-width="1"/>
+  </g>
+  
+  <!-- Central vortex/collection point -->
+  <g id="vortex">
+    <!-- Swirl effect -->
+    <circle cx="100" cy="100" r="35" fill="none" stroke="#4a90e2" stroke-width="2" opacity="0.3">
+      <animate attributeName="r" values="35;40;35" dur="2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.3;0.6;0.3" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="100" cy="100" r="28" fill="none" stroke="#4a90e2" stroke-width="2" opacity="0.4">
+      <animate attributeName="r" values="28;33;28" dur="2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.4;0.7;0.4" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="100" cy="100" r="21" fill="none" stroke="#4a90e2" stroke-width="2" opacity="0.5">
+      <animate attributeName="r" values="21;26;21" dur="2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.5;0.8;0.5" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    
+    <!-- Central folder icon -->
+    <path d="M 85 95 L 85 115 L 115 115 L 115 95 L 105 95 L 100 90 L 85 90 Z" 
+          fill="#4a90e2" stroke="#2c5aa0" stroke-width="2"/>
+    <rect x="85" y="95" width="30" height="5" fill="#2c5aa0"/>
+  </g>
+  
+  <!-- Motion lines suggesting inward movement -->
+  <g id="motion-lines" opacity="0.4">
+    <line x1="40" y1="60" x2="70" y2="80" stroke="#4a90e2" stroke-width="1" stroke-dasharray="3,3">
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="1.5s" repeatCount="indefinite"/>
+    </line>
+    <line x1="160" y1="60" x2="130" y2="80" stroke="#4a90e2" stroke-width="1" stroke-dasharray="3,3">
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="1.5s" repeatCount="indefinite"/>
+    </line>
+    <line x1="100" y1="30" x2="100" y2="60" stroke="#4a90e2" stroke-width="1" stroke-dasharray="3,3">
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="1.5s" repeatCount="indefinite"/>
+    </line>
+    <line x1="40" y1="120" x2="70" y2="110" stroke="#4a90e2" stroke-width="1" stroke-dasharray="3,3">
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="1.5s" repeatCount="indefinite"/>
+    </line>
+    <line x1="160" y1="120" x2="130" y2="110" stroke="#4a90e2" stroke-width="1" stroke-dasharray="3,3">
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="1.5s" repeatCount="indefinite"/>
+    </line>
+  </g>
+</svg>

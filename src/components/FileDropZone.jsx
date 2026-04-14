@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-function FileDropZone({ onSelectFolder, onSelectFiles }) {
+function FileDropZone({ onSelectFolder, onSelectFiles, onDropPaths }) {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = (e) => {

@@ -13,28 +13,33 @@ function Header({ apiKeySet, onApiKeyClick, fileCount }) {
   const handleViewLogs = async () => {
     if (window.electronAPI) {
       const logs = await window.electronAPI.getLogs(200);
-      // Open logs in a new window
       const logWindow = window.open('', 'Logs', 'width=800,height=600');
+      // Escape HTML entities to prevent XSS
+      const escaped = logs
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
       logWindow.document.write(`
         <html>
           <head>
             <title>Markdown Clusterer - Logs</title>
             <style>
-              body { 
-                background: #1a1a2e; 
-                color: #e0e0e0; 
-                font-family: monospace; 
+              body {
+                background: #1a1a2e;
+                color: #e0e0e0;
+                font-family: monospace;
                 padding: 20px;
                 margin: 0;
               }
-              pre { 
-                white-space: pre-wrap; 
+              pre {
+                white-space: pre-wrap;
                 word-wrap: break-word;
                 font-size: 12px;
                 line-height: 1.5;
               }
-              h1 { 
-                color: #0ea5e9; 
+              h1 {
+                color: #0ea5e9;
                 font-size: 18px;
                 margin-bottom: 20px;
               }
@@ -45,7 +50,7 @@ function Header({ apiKeySet, onApiKeyClick, fileCount }) {
           </head>
           <body>
             <h1>Application Logs</h1>
-            <pre>${logs
+            <pre>${escaped
               .replace(/\[ERROR\]/g, '<span class="error">[ERROR]</span>')
               .replace(/\[WARN\]/g, '<span class="warn">[WARN]</span>')
               .replace(/\[INFO\]/g, '<span class="info">[INFO]</span>')
@@ -79,10 +84,11 @@ function Header({ apiKeySet, onApiKeyClick, fileCount }) {
         <button
           onClick={onApiKeyClick}
           className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
-            apiKeySet 
-              ? 'bg-green-900/30 text-green-400 hover:bg-green-900/50' 
+            apiKeySet
+              ? 'bg-green-900/30 text-green-400 hover:bg-green-900/50'
               : 'bg-yellow-900/30 text-yellow-400 hover:bg-yellow-900/50'
           }`}
+          aria-label={apiKeySet ? 'API connected. Click to manage.' : 'API key not set. Click to configure.'}
         >
           <span className={`w-2 h-2 rounded-full ${apiKeySet ? 'bg-green-400' : 'bg-yellow-400'}`}></span>
           {apiKeySet ? 'API Connected' : 'Set API Key'}
@@ -94,6 +100,9 @@ function Header({ apiKeySet, onApiKeyClick, fileCount }) {
             onClick={() => setShowDebugMenu(!showDebugMenu)}
             className="px-3 py-2 text-gray-400 hover:text-white hover:bg-dark-300 rounded-lg transition-colors"
             title="Debug Options"
+            aria-label="Debug options"
+            aria-haspopup="true"
+            aria-expanded={showDebugMenu}
           >
             ⚙️
           </button>
@@ -104,16 +113,18 @@ function Header({ apiKeySet, onApiKeyClick, fileCount }) {
                 className="fixed inset-0 z-10" 
                 onClick={() => setShowDebugMenu(false)}
               />
-              <div className="absolute right-0 top-full mt-2 w-48 bg-dark-100 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 w-48 bg-dark-100 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden" role="menu">
                 <button
                   onClick={handleViewLogs}
                   className="w-full px-4 py-3 text-left text-gray-300 hover:bg-dark-300 transition-colors flex items-center gap-2"
+                  role="menuitem"
                 >
                   📋 View Logs
                 </button>
                 <button
                   onClick={handleOpenLogs}
                   className="w-full px-4 py-3 text-left text-gray-300 hover:bg-dark-300 transition-colors flex items-center gap-2"
+                  role="menuitem"
                 >
                   📂 Open Log Folder
                 </button>

@@ -11,7 +11,8 @@
     "build:mac": "vite build && electron-builder --mac",
     "build:win": "vite build && electron-builder --win",
     "build:linux": "vite build && electron-builder --linux",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest"
   },
   "build": {
     "appId": "com.markdown-clusterer.app",
@@ -46,11 +47,16 @@
   },
   "dependencies": {
     "dotenv": "^17.3.1",
+    "electron-store": "^11.0.2",
+    "js-yaml": "^4.1.0",
     "ml-kmeans": "^7.0.0",
     "openai": "^4.20.0",
-    "yaml": "^2.8.2"
+    "react-virtualized-auto-sizer": "^2.0.3",
+    "react-window": "^2.2.7"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",
@@ -58,12 +64,14 @@
     "concurrently": "^8.2.2",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
+    "jsdom": "^29.0.1",
     "postcss": "^8.4.32",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.3.3",
     "vite": "^5.0.10",
+    "vitest": "^4.1.2",
     "wait-on": "^7.2.0"
   },
   "keywords": [

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Background -->
+  <rect width="256" height="256" fill="#1a1a2e" rx="20"/>
+  
+  <!-- Books (left side) -->
+  <rect x="30" y="90" width="25" height="40" fill="#e74c3c" rx="2"/>
+  <rect x="35" y="60" width="22" height="35" fill="#3498db" rx="2"/>
+  <rect x="25" y="135" width="28" height="42" fill="#2ecc71" rx="2"/>
+  
+  <!-- Books (right side) -->
+  <rect x="201" y="85" width="25" height="40" fill="#9b59b6" rx="2"/>
+  <rect x="199" y="130" width="22" height="35" fill="#f39c12" rx="2"/>
+  <rect x="206" y="55" width="28" height="42" fill="#1abc9c" rx="2"/>
+  
+  <!-- Books (top) -->
+  <rect x="110" y="20" width="36" height="25" fill="#e67e22" rx="2"/>
+  
+  <!-- Central folder with glow -->
+  <circle cx="128" cy="128" r="50" fill="#4a90e2" opacity="0.2"/>
+  <circle cx="128" cy="128" r="40" fill="#4a90e2" opacity="0.3"/>
+  
+  <!-- Folder icon -->
+  <path d="M 98 118 L 98 148 L 158 148 L 158 118 L 143 118 L 135 108 L 98 108 Z" 
+        fill="#4a90e2" stroke="#2c5aa0" stroke-width="3"/>
+  <rect x="98" y="118" width="60" height="8" fill="#2c5aa0"/>
+  
+  <!-- Arrow indicators -->
+  <path d="M 60 100 L 85 115" stroke="#4a90e2" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 196 100 L 171 115" stroke="#4a90e2" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 128 50 L 128 85" stroke="#4a90e2" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 60 150 L 85 140" stroke="#4a90e2" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 196 150 L 171 140" stroke="#4a90e2" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+  
+  <!-- Arrowheads -->
+  <polygon points="85,115 80,110 80,120" fill="#4a90e2" opacity="0.6"/>
+  <polygon points="171,115 176,110 176,120" fill="#4a90e2" opacity="0.6"/>
+  <polygon points="128,85 123,90 133,90" fill="#4a90e2" opacity="0.6"/>
+  <polygon points="85,140 80,135 80,145" fill="#4a90e2" opacity="0.6"/>
+  <polygon points="171,140 176,135 176,145" fill="#4a90e2" opacity="0.6"/>
+</svg>
