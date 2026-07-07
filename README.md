@@ -2,22 +2,26 @@
 
 An AI-powered desktop app that organizes markdown files into topic-based clusters using OpenAI embeddings and K-Means clustering. Built with Electron and React for Mac, Windows, and Linux.
 
+# Markdown Clusterer
+
+An AI-powered desktop app that organizes markdown files into topic-based clusters using OpenAI embeddings and K-Means clustering. Built with Electron and React for Mac, Windows, and Linux.
+
 ![Platform](https://img.shields.io/badge/Platform-Mac%20%7C%20Windows%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-## Features
+## ✨ Key Features
 
-- **AI clustering** — Embeddings (`text-embedding-3-small`) + K-Means; GPT names each cluster
-- **Drag-and-drop** — Import folders/files; drag files between clusters to refine
-- **Merge & split** — Merge two clusters or split one by selecting files (Ctrl+click) and "Split to new cluster"
+- **AI-Powered Clustering**: Groups files using OpenAI or Pinecone E5 embeddings.
+- **Pinecone Alignment**: Native support for `multilingual-e5-large` (1024d) to match the Pinecone 'peace' index.
+- **Dynamic Namespaces**: Assign specific Pinecone namespaces to clusters on the fly.
+- **Contextual Injection**: Automatically bakes cluster descriptions and namespace metadata into markdown frontmatter.
+- **Semantic Overlap Detection**: Identifies and flags files with >92% semantic similarity to minimize database noise.
+- **Interactive GUI**: Drag-and-drop file organization with real-time AI naming.
+- **Flexible Organization**: Copy or Move modes with folder structure preservation.
 - **Suggest k** — Optional "Suggest k" uses the elbow method to suggest number of clusters
 - **Organize output** — Copy or move files into cluster folders; optional YAML tags, cluster meta, index manifest, per-cluster `_index.md`, and preserve relative paths
 - **Duplicate filtering** — "Filter Already Organised" removes files already organised into a target folder in a previous run, so re-exporting a full knowledge base only processes new or updated files
 - **Cross-platform** — Runs on macOS, Windows, and Linux
-
-## Prerequisites
-
-- **Node.js** 18+
 - **OpenAI API key** ([platform.openai.com](https://platform.openai.com))
 
 Supports OpenAI-compatible APIs (e.g. Ollama) via `OPENAI_BASE_URL` in `.env`.

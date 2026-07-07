@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 function ApiKeyModal({ onSubmit, onClose, error, isSet }) {
   const [apiKey, setApiKey] = useState('');
   const [baseURL, setBaseURL] = useState('');
+  const [pineconeKey, setPineconeKey] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -10,7 +11,7 @@ function ApiKeyModal({ onSubmit, onClose, error, isSet }) {
     if (!apiKey.trim()) return;
     
     setLoading(true);
-    await onSubmit(apiKey.trim(), baseURL.trim());
+    await onSubmit(apiKey.trim(), baseURL.trim(), pineconeKey.trim());
     setLoading(false);
   };
 
@@ -42,7 +43,14 @@ function ApiKeyModal({ onSubmit, onClose, error, isSet }) {
               value={baseURL}
               onChange={(e) => setBaseURL(e.target.value)}
               placeholder="Base URL (Optional, e.g., http://localhost:11434/v1 for Ollama)"
-              className="w-full px-4 py-3 bg-dark-200 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 transition-colors"
+              className="w-full px-4 py-3 mb-3 bg-dark-200 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500 transition-colors"
+            />
+            <input
+              type="password"
+              value={pineconeKey}
+              onChange={(e) => setPineconeKey(e.target.value)}
+              placeholder="Pinecone API Key (Optional, for E5 embeddings)"
+              className="w-full px-4 py-3 bg-dark-200 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
             />
           </div>
 

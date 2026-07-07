@@ -190,16 +190,21 @@ process.on('unhandledRejection', (reason) => {
 // IPC Handlers
 
 // Save API key securely
-ipcMain.handle('save-api-key', async (event, apiKey, baseURL) => {
-  logger.info('Saving API key securely');
+ipcMain.handle('save-api-key', async (event, apiKey, baseURL, pineconeKey) => {
+  logger.info('Saving API keys securely');
   try {
     if (safeStorage.isEncryptionAvailable()) {
       const encrypted = safeStorage.encryptString(apiKey);
       store.set('apiKey', encrypted.toString('base64'));
-      logger.info('API key encrypted and saved');
+      if (pineconeKey) {
+        const encryptedPinecone = safeStorage.encryptString(pineconeKey);
+        store.set('pineconeApiKey', encryptedPinecone.toString('base64'));
+      }
+      logger.info('API keys encrypted and saved');
     } else {
       logger.warn('Encryption not available, storing in plain text');
       store.set('apiKey', apiKey);
+      if (pineconeKey) store.set('pineconeApiKey', pineconeKey);
     }
     
     if (baseURL) {
@@ -210,7 +215,7 @@ ipcMain.handle('save-api-key', async (event, apiKey, baseURL) => {
     
     return { success: true };
   } catch (error) {
-    logger.error('Failed to save API key', error);
+    logger.error('Failed to save API keys', error);
     return { success: false, error: error.message };
   }
 });
@@ -262,16 +267,17 @@ ipcMain.handle('load-api-key', async () => {
   }
 });
 
-// Delete stored API key
+// Delete stored API keys
 ipcMain.handle('delete-api-key', async () => {
-  logger.info('Deleting stored API key');
+  logger.info('Deleting stored API keys');
   try {
     store.delete('apiKey');
+    store.delete('pineconeApiKey');
     store.delete('baseURL');
     openaiClient = null;
     return { success: true };
   } catch (error) {
-    logger.error('Failed to delete API key', error);
+    logger.error('Failed to delete API keys', error);
     return { success: false, error: error.message };
   }
 });
@@ -297,23 +303,37 @@ ipcMain.handle('check-env-api-key', async () => {
 });
 
 // Set OpenAI API Key
-ipcMain.handle('set-api-key', async (event, apiKey, baseURL) => {
-  logger.info('Setting OpenAI API key');
+ipcMain.handle('set-api-key', async (event, apiKey, baseURL, pineconeKey) => {
+  logger.info('Setting API keys');
   try {
     const config = { apiKey };
     if (baseURL) {
       config.baseURL = baseURL;
     }
     openaiClient = new OpenAI(config);
+    // Store Pinecone key in global if provided
+    if (pineconeKey) {
+      store.set('currentPineconeKey', pineconeKey); // Temporary session storage
+    }
     // Test the key with a simple request
     await openaiClient.models.list();
-    logger.info('OpenAI API key validated successfully');
+    logger.info('API keys validated successfully');
     return { success: true };
   } catch (error) {
-    logger.error('Failed to validate OpenAI API key', error);
+    logger.error('Failed to validate API keys', error);
     openaiClient = null;
     return { success: false, error: error.message };
   }
+});
+
+// New: Set Embedding Model
+ipcMain.handle('set-embedding-model', async (event, modelName) => {
+  if (modelName === 'text-embedding-3-small' || modelName === 'multilingual-e5-large' || modelName === 'text-embedding-3-large') {
+    CONFIG.EMBEDDING_MODEL = modelName;
+    logger.info('Embedding model updated', { model: modelName });
+    return { success: true };
+  }
+  return { success: false, error: 'Invalid model name' };
 });
 
 // Select folder dialog
@@ -529,11 +549,39 @@ ipcMain.handle('cluster-files', async (event, files, numClusters, aiHint) => {
       while (attempt < CONFIG.MAX_RETRIES && !batchEmbeddings) {
         try {
           await apiRateLimiter.throttle();
-          const response = await openaiClient.embeddings.create({
-            model: CONFIG.EMBEDDING_MODEL,
-            input: texts,
-          });
-          batchEmbeddings = response.data.map(d => d.embedding);
+          
+          if (CONFIG.EMBEDDING_MODEL === 'multilingual-e5-large') {
+            const pk = store.get('currentPineconeKey') || process.env.PINECONE_API_KEY;
+            if (!pk) throw new Error('Pinecone API Key required for multilingual-e5-large');
+            
+            const response = await fetch('https://api.pinecone.io/embed', {
+              method: 'POST',
+              headers: {
+                'Api-Key': pk,
+                'Content-Type': 'application/json',
+                'X-Pinecone-API-Version': '2024-10'
+              },
+              body: JSON.stringify({
+                model: 'multilingual-e5-large',
+                inputs: texts.map(t => ({ text: t })),
+                parameters: { input_type: 'passage', truncate: 'END' }
+              })
+            });
+            
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`Pinecone Embedding Error: ${response.status} ${errText}`);
+            }
+            
+            const resData = await response.json();
+            batchEmbeddings = resData.data.map(d => d.values);
+          } else {
+            const response = await openaiClient.embeddings.create({
+              model: CONFIG.EMBEDDING_MODEL,
+              input: texts,
+            });
+            batchEmbeddings = response.data.map(d => d.embedding);
+          }
         } catch (error) {
           attempt++;
           if (attempt >= CONFIG.MAX_RETRIES) throw error;
@@ -621,7 +669,7 @@ Respond with a JSON object in this exact format:
       clustersCreated: finalClusters.length 
     });
     
-    return { success: true, clusters: finalClusters };
+    return { success: true, clusters: finalClusters, embeddings: embeddings };
   } catch (error) {
     logger.error('AI clustering failed', error);
     return { success: false, error: error.message };
@@ -630,8 +678,20 @@ Respond with a JSON object in this exact format:
 
 // Move files to cluster folders
 ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, options = {}) => {
-  const { mode = 'copy', injectTags = false, injectClusterDescription = false, writeManifest = false, writeClusterIndex = false, preserveRelativePaths = false } = options;
-  const sanitizedOutputFolder = sanitizePath(outputFolder);
+  const { 
+    mode = 'copy', 
+    injectTags = false, 
+    injectClusterDescription = false, 
+    writeManifest = false, 
+    writeClusterIndex = false, 
+    preserveRelativePaths = false,
+    namespace = '' // New: Namespace support
+  } = options;
+  
+  const baseOutputFolder = sanitizePath(outputFolder);
+  const sanitizedOutputFolder = namespace 
+    ? path.join(baseOutputFolder, namespace.replace(/[<>:"/\\|?*]/g, '_'))
+    : baseOutputFolder;
 
   logger.info('Organizing files', {
     outputFolder: sanitizedOutputFolder,
@@ -703,17 +763,30 @@ ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, op
           }
         }
       }
+      
       if (cluster != null) existingFm.cluster = cluster;
-      if (clusterDescription != null) existingFm.clusterDescription = clusterDescription;
+      if (clusterDescription != null) {
+        existingFm.clusterDescription = clusterDescription;
+        // Search enrichment: Every chunk in Pinecone will now have this context
+        existingFm.topic_context = clusterDescription; 
+      }
+      
+      if (namespace) existingFm.namespace = namespace;
 
       const newFmString = YAML.dump(existingFm);
       return `---\n${newFmString}---\n${newContent}`;
     };
     
     for (const cluster of clusters) {
+      // Per-cluster namespace support
+      const currentNamespace = cluster.namespace || namespace;
+      const clusterBaseFolder = currentNamespace 
+        ? path.join(baseOutputFolder, currentNamespace.replace(/[<>:"/\\|?*]/g, '_'))
+        : baseOutputFolder;
+
       // Create cluster folder
       const clusterFolderName = cluster.name.replace(/[<>:"/\\|?*]/g, '_');
-      const clusterFolder = path.join(sanitizedOutputFolder, clusterFolderName);
+      const clusterFolder = path.join(clusterBaseFolder, clusterFolderName);
       
       const relativeFilePaths = [];
 
@@ -750,7 +823,8 @@ ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, op
               const newContent = injectFrontmatter(fileContent, {
                 tags: injectTags ? [cluster.name] : [],
                 cluster: injectClusterDescription ? cluster.name : undefined,
-                clusterDescription: injectClusterDescription ? (cluster.description || '') : undefined
+                clusterDescription: injectClusterDescription ? (cluster.description || '') : undefined,
+                namespace: currentNamespace || undefined
               });
               fs.writeFileSync(destPath, newContent, 'utf8');
               if (mode === 'move') {

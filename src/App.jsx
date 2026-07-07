@@ -27,6 +27,9 @@ const initialState = {
   aiHint: '',
   dedupFolder: '',        // output folder used for dedup check
   dedupSkipped: 0,        // how many files were hidden as already-organised
+  namespace: '',          // Pinecone namespace
+  embeddingModel: 'text-embedding-3-small',
+  embeddings: [],         // Raw embeddings for similarity checks
 };
 
 function appReducer(state, action) {
@@ -47,7 +50,7 @@ function appReducer(state, action) {
     case 'CLEAR_FILES':
       return { ...state, files: [], clusters: [], organized: false };
     case 'SET_CLUSTERS':
-      return { ...state, clusters: action.payload };
+      return { ...state, clusters: action.payload.clusters, embeddings: action.payload.embeddings || state.embeddings };
     case 'SET_PROCESSING':
       return { ...state, isProcessing: action.payload };
     case 'SET_PROCESSING_STEP':
@@ -149,6 +152,18 @@ function appReducer(state, action) {
       newClusters.splice(clusterIndex + 1, 0, newCluster);
       return { ...state, clusters: newClusters, organized: false };
     }
+    case 'SET_NAMESPACE':
+      return { ...state, namespace: action.payload };
+    case 'SET_CLUSTER_NAMESPACE':
+      return {
+        ...state,
+        clusters: state.clusters.map((c, i) =>
+          i === action.payload.index ? { ...c, namespace: action.payload.namespace } : c
+        ),
+        organized: false,
+      };
+    case 'SET_EMBEDDING_MODEL':
+      return { ...state, embeddingModel: action.payload };
     default:
       return state;
   }
@@ -156,7 +171,7 @@ function appReducer(state, action) {
 
 function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
-  const { apiKeySet, showApiModal, files, clusters, isProcessing, processingStep, numClusters, outputFolder, organized, error, orgMode, injectTags, writeManifest, writeClusterIndex, injectClusterDescription, preserveRelativePaths, isGlobalDragging, aiHint, dedupFolder, dedupSkipped } = state;
+  const { apiKeySet, showApiModal, files, clusters, isProcessing, processingStep, numClusters, outputFolder, organized, error, orgMode, injectTags, writeManifest, writeClusterIndex, injectClusterDescription, preserveRelativePaths, isGlobalDragging, aiHint, dedupFolder, dedupSkipped, namespace, embeddingModel } = state;
 
   // Update suggested clusters when files change
   useEffect(() => {
@@ -205,11 +220,11 @@ function App() {
     }
   }, []);
 
-  const handleApiKeySubmit = async (apiKey, baseURL) => {
+  const handleApiKeySubmit = async (apiKey, baseURL, pineconeKey) => {
     try {
-      const result = await window.electronAPI.setApiKey(apiKey, baseURL);
+      const result = await window.electronAPI.setApiKey(apiKey, baseURL, pineconeKey);
       if (result.success) {
-        await window.electronAPI.saveApiKey(apiKey, baseURL);
+        await window.electronAPI.saveApiKey(apiKey, baseURL, pineconeKey);
         dispatch({ type: 'SET_API_KEY_STATUS', payload: true });
         dispatch({ type: 'SHOW_API_MODAL', payload: false });
         dispatch({ type: 'SET_ERROR', payload: '' });
@@ -267,7 +282,7 @@ function App() {
     try {
       const result = await window.electronAPI.clusterFiles(files, numClusters, aiHint);
       if (result.success) {
-        dispatch({ type: 'SET_CLUSTERS', payload: result.clusters });
+        dispatch({ type: 'SET_CLUSTERS', payload: { clusters: result.clusters, embeddings: result.embeddings } });
         dispatch({ type: 'SET_PROCESSING_STEP', payload: '' });
       } else {
         dispatch({ type: 'SET_ERROR', payload: result.error });
@@ -355,7 +370,15 @@ function App() {
     dispatch({ type: 'SET_ERROR', payload: '' });
 
     try {
-      const result = await window.electronAPI.organizeFiles(outputFolder, clusters, files, { mode: orgMode, injectTags, writeManifest, writeClusterIndex, injectClusterDescription, preserveRelativePaths });
+      const result = await window.electronAPI.organizeFiles(outputFolder, clusters, files, { 
+        mode: orgMode, 
+        injectTags, 
+        writeManifest, 
+        writeClusterIndex, 
+        injectClusterDescription, 
+        preserveRelativePaths,
+        namespace 
+      });
       if (result.success) {
         dispatch({ type: 'SET_ORGANIZED', payload: true });
         dispatch({ type: 'SET_PROCESSING_STEP', payload: '' });
@@ -519,6 +542,7 @@ function App() {
           <ClusterView
             clusters={clusters}
             files={files}
+            embeddings={embeddings}
             numClustersRequested={numClusters}
             outputFolder={outputFolder}
             organized={organized}
@@ -534,10 +558,18 @@ function App() {
             setInjectClusterDescription={(val) => dispatch({ type: 'SET_INJECT_CLUSTER_DESCRIPTION', payload: val })}
             preserveRelativePaths={preserveRelativePaths}
             setPreserveRelativePaths={(val) => dispatch({ type: 'SET_PRESERVE_RELATIVE_PATHS', payload: val })}
+            namespace={namespace}
+            setNamespace={(val) => dispatch({ type: 'SET_NAMESPACE', payload: val })}
+            embeddingModel={embeddingModel}
+            setEmbeddingModel={async (val) => {
+              await window.electronAPI.setEmbeddingModel(val);
+              dispatch({ type: 'SET_EMBEDDING_MODEL', payload: val });
+            }}
             onSelectOutputFolder={handleSelectOutputFolder}
             onOrganize={handleOrganize}
             onMoveFile={handleMoveFile}
             onRenameCluster={handleRenameCluster}
+            onSetClusterNamespace={(index, ns) => dispatch({ type: 'SET_CLUSTER_NAMESPACE', payload: { index, namespace: ns } })}
             onMergeClusters={handleMergeClusters}
             onSplitCluster={handleSplitCluster}
             onRecluster={() => dispatch({ type: 'SET_CLUSTERS', payload: [] })}

@@ -22,9 +22,15 @@ function ClusterView({
   onOrganize,
   onMoveFile,
   onRenameCluster,
+  onSetClusterNamespace,
   onMergeClusters,
   onSplitCluster,
-  onRecluster
+  onRecluster,
+  namespace,
+  setNamespace,
+  embeddingModel,
+  setEmbeddingModel,
+  embeddings
 }) {
   const [draggedFile, setDraggedFile] = useState(null);
   const [dragOverCluster, setDragOverCluster] = useState(null);
@@ -33,6 +39,42 @@ function ClusterView({
   const [selectedFileIndex, setSelectedFileIndex] = useState(null);
   const [selectedForSplit, setSelectedForSplit] = useState(() => new Set());
   const [mergeMenuOpen, setMergeMenuOpen] = useState(null);
+  const [duplicateFlags, setDuplicateFlags] = useState({}); // { fileIndex: true }
+
+  const cosineSimilarity = (vecA, vecB) => {
+    if (!vecA || !vecB) return 0;
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+      dotProduct += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
+    }
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  };
+
+  const checkClusterDuplicates = (clusterIndex) => {
+    const cluster = clusters[clusterIndex];
+    if (!cluster || !embeddings || embeddings.length === 0) return;
+
+    const newFlags = { ...duplicateFlags };
+    const indices = cluster.fileIndices;
+    
+    for (let i = 0; i < indices.length; i++) {
+      for (let j = i + 1; j < indices.length; j++) {
+        const idxA = indices[i];
+        const idxB = indices[j];
+        const sim = cosineSimilarity(embeddings[idxA], embeddings[idxB]);
+        
+        if (sim > 0.92) { // 92% similarity threshold
+          newFlags[idxA] = true;
+          newFlags[idxB] = true;
+        }
+      }
+    }
+    setDuplicateFlags(newFlags);
+  };
 
   const formatDate = (dateString) => {
     if (!dateString) return '';
@@ -217,6 +259,34 @@ function ClusterView({
           </label>
         </div>
 
+        <div className="flex items-center gap-4 bg-dark-200 p-2 rounded-lg border border-blue-500/30">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-blue-400 font-bold">Namespace:</span>
+            <input
+              type="text"
+              value={namespace}
+              onChange={(e) => setNamespace(e.target.value)}
+              placeholder="e.g. projects"
+              className="w-24 px-2 py-1 bg-dark-100 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
+              title="Creates a parent folder for all clusters and injects into metadata"
+            />
+          </label>
+          <div className="w-px h-4 bg-gray-600 mx-1"></div>
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-gray-400">Model:</span>
+            <select
+              value={embeddingModel}
+              onChange={(e) => setEmbeddingModel(e.target.value)}
+              className="bg-dark-100 border border-gray-600 rounded text-xs px-1 py-0.5 text-gray-300"
+              title="Choose the model used for semantic analysis"
+            >
+              <option value="text-embedding-3-small">OpenAI Small (1536d)</option>
+              <option value="text-embedding-3-large">OpenAI Large (3072d)</option>
+              <option value="multilingual-e5-large">Pinecone E5 (1024d)</option>
+            </select>
+          </label>
+        </div>
+
         <div className="flex items-center gap-4">
           <button
             onClick={onSelectOutputFolder}
@@ -292,11 +362,32 @@ function ClusterView({
                     📁 {cluster.name}
                   </h3>
                 )}
-                <span className="text-sm text-gray-400 ml-2">
+                
+                {/* Per-cluster Namespace override */}
+                <div className="flex items-center gap-1 ml-4 bg-dark-200/50 px-2 py-0.5 rounded border border-gray-600/30">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase">NS:</span>
+                  <input
+                    type="text"
+                    value={cluster.namespace || ''}
+                    placeholder={namespace || 'none'}
+                    onChange={(e) => onSetClusterNamespace(clusterIndex, e.target.value)}
+                    className="bg-transparent border-none text-xs text-blue-400 focus:outline-none w-20 placeholder:text-gray-600"
+                    title="Override global namespace for this cluster"
+                  />
+                </div>
+
+                <span className="text-sm text-gray-400 ml-auto">
                   {cluster.fileIndices.length} files
                 </span>
                 {clusters.length > 1 && (
-                  <div className="relative ml-2">
+                    <button
+                      type="button"
+                      onClick={() => checkClusterDuplicates(clusterIndex)}
+                      className="text-xs px-2 py-1 bg-amber-900/40 hover:bg-amber-800/60 text-amber-300 rounded border border-amber-600/50"
+                      title="Identify files with >92% semantic similarity"
+                    >
+                      Check Overlap
+                    </button>
                     <button
                       type="button"
                       onClick={() => setMergeMenuOpen(mergeMenuOpen === clusterIndex ? null : clusterIndex)}
@@ -375,9 +466,10 @@ function ClusterView({
                         toggleFileForSplit(e, fileIndex);
                         if (!e.ctrlKey && !e.metaKey) setSelectedFileIndex(fileIndex);
                       }}
-                      className={`bg-dark-200/50 rounded-lg p-2 cursor-move hover:bg-dark-200 transition-colors flex items-center gap-2 ${selectedFileIndex === fileIndex ? 'ring-2 ring-primary-500' : ''} ${isSelectedForSplit ? 'ring-2 ring-amber-400' : ''}`}
+                      className={`bg-dark-200/50 rounded-lg p-2 cursor-move hover:bg-dark-200 transition-colors flex items-center gap-2 ${selectedFileIndex === fileIndex ? 'ring-2 ring-primary-500' : ''} ${isSelectedForSplit ? 'ring-2 ring-amber-400' : ''} ${duplicateFlags[fileIndex] ? 'border border-amber-500 bg-amber-500/10' : ''}`}
                       role="button"
                       tabIndex={0}
+                      title={duplicateFlags[fileIndex] ? "High semantic overlap detected with another file in this cluster" : ""}
                       aria-label={`File: ${file.name}. Drag to move, click to preview, Ctrl+click to select for split.`}
                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedFileIndex(fileIndex); } }}
                     >
