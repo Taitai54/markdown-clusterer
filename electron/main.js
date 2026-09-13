@@ -9,6 +9,14 @@ let store;
 let mainWindow;
 let openaiClient = null;
 let logger;
+// Pinecone key for the current session only — never persisted in plaintext.
+// Populated from the modal (set-api-key) or decrypted from electron-store on load-api-key.
+let sessionPineconeKey = null;
+// Runtime provider overrides — set via the in-app provider switch (Header),
+// take precedence over CHAT_PROVIDER/EMBEDDING_PROVIDER in .env. Null means
+// "use .env / default". Session-only, not persisted.
+let activeChatProvider = null;
+let activeEmbeddingProvider = null;
 
 // Path validation helper
 const sanitizePath = (filePath) => {
@@ -18,6 +26,18 @@ const sanitizePath = (filePath) => {
     throw new Error('Invalid path: contains null bytes');
   }
   return normalized;
+};
+
+// Join path segments under `root`, throwing if the resolved result escapes it.
+// Cluster names/namespaces are user-editable text, so `..`/absolute-path segments
+// must not be allowed to write outside the chosen output folder.
+const safeJoin = (root, ...segments) => {
+  const resolvedRoot = path.resolve(root);
+  const target = path.resolve(resolvedRoot, ...segments);
+  if (target !== resolvedRoot && !target.startsWith(resolvedRoot + path.sep)) {
+    throw new Error(`Path escapes output folder: "${segments.join('/')}"`);
+  }
+  return target;
 };
 
 // Strip YAML frontmatter and optionally extract title for embedding/naming
@@ -107,6 +127,102 @@ const CONFIG = {
 
 const apiRateLimiter = new RateLimiter(50, 60000); // 50 requests per minute
 
+// Chat-provider config for the cluster-naming call only. Embeddings stay on the
+// existing OpenAI/Pinecone path above (OpenRouter/Gemini/Ollama embedding support
+// is a documented future option, not wired up here — see README "Choosing a provider").
+// All providers are OpenAI-compatible, so the same `openai` SDK is reused for each
+// by swapping apiKey/baseURL — no extra provider SDKs needed.
+const CHAT_PROVIDERS = {
+  openai: {
+    apiKeyEnv: 'OPENAI_API_KEY',
+    baseURL: undefined,
+    modelEnv: 'OPENAI_CHAT_MODEL',
+    defaultModel: CONFIG.CLUSTERING_MODEL
+  },
+  openrouter: {
+    apiKeyEnv: 'OPENROUTER_API_KEY',
+    baseURL: 'https://openrouter.ai/api/v1',
+    modelEnv: 'OPENROUTER_CHAT_MODEL',
+    defaultModel: 'openai/gpt-4o-mini'
+  },
+  gemini: {
+    apiKeyEnv: 'GEMINI_API_KEY',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    modelEnv: 'GEMINI_CHAT_MODEL',
+    defaultModel: 'gemini-2.5-flash'
+  },
+  local: {
+    apiKeyEnv: null, // Ollama's OpenAI-compat server ignores the key
+    baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1',
+    modelEnv: 'OLLAMA_CHAT_MODEL',
+    // No tag works for everyone — this must match an installed model exactly
+    // (`ollama list`), so always set OLLAMA_CHAT_MODEL rather than relying on this.
+    defaultModel: 'llama3.2:latest'
+  }
+};
+
+// Build an OpenAI-SDK client pointed at whichever provider CHAT_PROVIDER selects.
+function getChatClient() {
+  const providerName = (activeChatProvider || process.env.CHAT_PROVIDER || 'openai').toLowerCase();
+  const provider = CHAT_PROVIDERS[providerName] || CHAT_PROVIDERS.openai;
+  const apiKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : 'not-required';
+  if (provider.apiKeyEnv && !apiKey) {
+    throw new Error(`CHAT_PROVIDER=${providerName} requires ${provider.apiKeyEnv} to be set in .env`);
+  }
+  const model = (provider.modelEnv && process.env[provider.modelEnv]) || provider.defaultModel;
+  const config = { apiKey: apiKey || 'not-required' };
+  if (provider.baseURL) config.baseURL = provider.baseURL;
+  return { client: new OpenAI(config), model, providerName };
+}
+
+// Embedding-provider config. `openai` reuses the already-validated `openaiClient` +
+// the in-app embedding-model dropdown (CONFIG.EMBEDDING_MODEL) exactly as before —
+// this is the default and preserves prior behavior unchanged. gemini/openrouter are
+// alternates so clustering doesn't die if the OpenAI key runs out of credits.
+// (Local/Ollama isn't listed: it has no embedding-capable model pulled by default,
+// and even when one is pulled it's a separate, deliberate opt-in — see README.)
+const EMBEDDING_PROVIDERS = {
+  gemini: {
+    apiKeyEnv: 'GEMINI_API_KEY',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    modelEnv: 'GEMINI_EMBEDDING_MODEL',
+    defaultModel: 'gemini-embedding-001'
+  },
+  openrouter: {
+    apiKeyEnv: 'OPENROUTER_API_KEY',
+    baseURL: 'https://openrouter.ai/api/v1',
+    modelEnv: 'OPENROUTER_EMBEDDING_MODEL',
+    defaultModel: 'openai/text-embedding-3-small'
+  },
+  local: {
+    apiKeyEnv: null, // Ollama's OpenAI-compat server ignores the key
+    baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1',
+    modelEnv: 'OLLAMA_EMBEDDING_MODEL',
+    // Requires a dedicated embedding model pulled — chat models (llama3.2 etc.)
+    // don't do embeddings. `ollama pull nomic-embed-text` first.
+    defaultModel: 'nomic-embed-text'
+  }
+};
+
+// Returns the client+model to embed with, honoring EMBEDDING_PROVIDER when it's
+// set to a non-OpenAI provider; otherwise falls back to the existing openaiClient
+// + CONFIG.EMBEDDING_MODEL path (default, unchanged behavior).
+function getEmbeddingClient() {
+  const providerName = (activeEmbeddingProvider || process.env.EMBEDDING_PROVIDER || 'openai').toLowerCase();
+  const provider = EMBEDDING_PROVIDERS[providerName];
+  if (!provider) {
+    return { client: openaiClient, model: CONFIG.EMBEDDING_MODEL, providerName: 'openai' };
+  }
+  const apiKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : 'not-required';
+  if (provider.apiKeyEnv && !apiKey) {
+    throw new Error(`EMBEDDING_PROVIDER=${providerName} requires ${provider.apiKeyEnv} to be set in .env`);
+  }
+  const model = (provider.modelEnv && process.env[provider.modelEnv]) || provider.defaultModel;
+  const config = { apiKey: apiKey || 'not-required' };
+  if (provider.baseURL) config.baseURL = provider.baseURL;
+  return { client: new OpenAI(config), model, providerName };
+}
+
 // Initialize logger after app is ready
 function initLogger() {
   logger = require('./logger');
@@ -133,7 +249,13 @@ function createWindow() {
     backgroundColor: '#1a1a2e'
   });
 
-  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
+  // app.isPackaged is Electron's authoritative signal — don't gate this on
+  // NODE_ENV too. .env sets NODE_ENV=development for logging purposes, and
+  // dotenv loads it even inside a packaged build (it reads .env from the
+  // working directory), which made the built .exe try to load the Vite dev
+  // server (localhost:5173) instead of dist/index.html — blank window with
+  // nothing to connect to.
+  if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
     logger.info('Running in development mode');
   } else {
@@ -186,6 +308,69 @@ process.on('unhandledRejection', (reason) => {
     console.error('Unhandled rejection:', reason);
   }
 });
+
+// Shared embedding generation, used by both cluster-files and suggest-k so they
+// stay in sync on the OpenAI/Pinecone branch (previously suggest-k always used
+// OpenAI and errored when multilingual-e5-large was selected).
+async function generateEmbeddingsForFiles(files, { onBatchDone } = {}) {
+  const embeddings = [];
+
+  for (let i = 0; i < files.length; i += CONFIG.EMBEDDING_BATCH_SIZE) {
+    const batch = files.slice(i, i + CONFIG.EMBEDDING_BATCH_SIZE);
+    const texts = batch.map(f => getContentForEmbedding(f.content, CONFIG.EMBEDDING_PREVIEW_LENGTH));
+
+    let attempt = 0;
+    let batchEmbeddings = null;
+
+    while (attempt < CONFIG.MAX_RETRIES && !batchEmbeddings) {
+      try {
+        await apiRateLimiter.throttle();
+
+        if (CONFIG.EMBEDDING_MODEL === 'multilingual-e5-large') {
+          const pk = sessionPineconeKey || process.env.PINECONE_API_KEY;
+          if (!pk) throw new Error('Pinecone API Key required for multilingual-e5-large');
+
+          const response = await fetch('https://api.pinecone.io/embed', {
+            method: 'POST',
+            headers: {
+              'Api-Key': pk,
+              'Content-Type': 'application/json',
+              'X-Pinecone-API-Version': '2024-10'
+            },
+            body: JSON.stringify({
+              model: 'multilingual-e5-large',
+              inputs: texts.map(t => ({ text: t })),
+              parameters: { input_type: 'passage', truncate: 'END' }
+            })
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Pinecone Embedding Error: ${response.status} ${errText}`);
+          }
+
+          const resData = await response.json();
+          batchEmbeddings = resData.data.map(d => d.values);
+        } else {
+          const emb = getEmbeddingClient();
+          const response = await emb.client.embeddings.create({
+            model: emb.model,
+            input: texts,
+          });
+          batchEmbeddings = response.data.map(d => d.embedding);
+        }
+      } catch (error) {
+        attempt++;
+        if (attempt >= CONFIG.MAX_RETRIES) throw error;
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt))); // Exponential backoff
+      }
+    }
+    embeddings.push(...batchEmbeddings);
+    if (onBatchDone) onBatchDone(i + batch.length);
+  }
+
+  return embeddings;
+}
 
 // IPC Handlers
 
@@ -246,12 +431,26 @@ ipcMain.handle('load-api-key', async () => {
     }
 
     const baseURL = store.get('baseURL');
-    
+
+    // Restore the Pinecone key (if saved) into memory for this session so
+    // multilingual-e5-large embeddings keep working after an app restart.
+    const storedPineconeKey = store.get('pineconeApiKey');
+    if (storedPineconeKey) {
+      try {
+        sessionPineconeKey = safeStorage.isEncryptionAvailable()
+          ? safeStorage.decryptString(Buffer.from(storedPineconeKey, 'base64'))
+          : storedPineconeKey;
+      } catch (decryptError) {
+        logger.warn('Failed to decrypt stored Pinecone key', decryptError);
+        sessionPineconeKey = null;
+      }
+    }
+
     // Test the key
     const config = { apiKey };
     if (baseURL) config.baseURL = baseURL;
     openaiClient = new OpenAI(config);
-    
+
     try {
       await openaiClient.models.list();
       logger.info('Stored API key validated successfully');
@@ -275,6 +474,7 @@ ipcMain.handle('delete-api-key', async () => {
     store.delete('pineconeApiKey');
     store.delete('baseURL');
     openaiClient = null;
+    sessionPineconeKey = null;
     return { success: true };
   } catch (error) {
     logger.error('Failed to delete API keys', error);
@@ -311,9 +511,10 @@ ipcMain.handle('set-api-key', async (event, apiKey, baseURL, pineconeKey) => {
       config.baseURL = baseURL;
     }
     openaiClient = new OpenAI(config);
-    // Store Pinecone key in global if provided
+    // Session-only, in-memory — never written to disk in plaintext.
+    // (save-api-key persists an encrypted copy if the user opts to save.)
     if (pineconeKey) {
-      store.set('currentPineconeKey', pineconeKey); // Temporary session storage
+      sessionPineconeKey = pineconeKey;
     }
     // Test the key with a simple request
     await openaiClient.models.list();
@@ -334,6 +535,36 @@ ipcMain.handle('set-embedding-model', async (event, modelName) => {
     return { success: true };
   }
   return { success: false, error: 'Invalid model name' };
+});
+
+// Runtime provider switch — lets the UI pick CHAT_PROVIDER/EMBEDDING_PROVIDER
+// without editing .env or restarting. Session-only (see activeChatProvider/
+// activeEmbeddingProvider above).
+ipcMain.handle('get-provider-config', async () => {
+  return {
+    chatProvider: (activeChatProvider || process.env.CHAT_PROVIDER || 'openai').toLowerCase(),
+    embeddingProvider: (activeEmbeddingProvider || process.env.EMBEDDING_PROVIDER || 'openai').toLowerCase(),
+    chatOptions: Object.keys(CHAT_PROVIDERS),
+    embeddingOptions: ['openai', ...Object.keys(EMBEDDING_PROVIDERS)]
+  };
+});
+
+ipcMain.handle('set-chat-provider', async (event, providerName) => {
+  if (!CHAT_PROVIDERS[providerName]) {
+    return { success: false, error: `Unknown chat provider: ${providerName}` };
+  }
+  activeChatProvider = providerName;
+  logger.info('Chat provider switched at runtime', { providerName });
+  return { success: true };
+});
+
+ipcMain.handle('set-embedding-provider', async (event, providerName) => {
+  if (providerName !== 'openai' && !EMBEDDING_PROVIDERS[providerName]) {
+    return { success: false, error: `Unknown embedding provider: ${providerName}` };
+  }
+  activeEmbeddingProvider = providerName;
+  logger.info('Embedding provider switched at runtime', { providerName });
+  return { success: true };
 });
 
 // Select folder dialog
@@ -534,66 +765,14 @@ ipcMain.handle('cluster-files', async (event, files, numClusters, aiHint) => {
 
   try {
     reportProgress(`Generating embeddings for ${files.length} files...`);
-    
+
     // 1. Generate Embeddings for all files
-    // Generate Embeddings
-    const embeddings = [];
-
-    for (let i = 0; i < files.length; i += CONFIG.EMBEDDING_BATCH_SIZE) {
-      const batch = files.slice(i, i + CONFIG.EMBEDDING_BATCH_SIZE);
-      const texts = batch.map(f => getContentForEmbedding(f.content, CONFIG.EMBEDDING_PREVIEW_LENGTH));
-      
-      let attempt = 0;
-      let batchEmbeddings = null;
-
-      while (attempt < CONFIG.MAX_RETRIES && !batchEmbeddings) {
-        try {
-          await apiRateLimiter.throttle();
-          
-          if (CONFIG.EMBEDDING_MODEL === 'multilingual-e5-large') {
-            const pk = store.get('currentPineconeKey') || process.env.PINECONE_API_KEY;
-            if (!pk) throw new Error('Pinecone API Key required for multilingual-e5-large');
-            
-            const response = await fetch('https://api.pinecone.io/embed', {
-              method: 'POST',
-              headers: {
-                'Api-Key': pk,
-                'Content-Type': 'application/json',
-                'X-Pinecone-API-Version': '2024-10'
-              },
-              body: JSON.stringify({
-                model: 'multilingual-e5-large',
-                inputs: texts.map(t => ({ text: t })),
-                parameters: { input_type: 'passage', truncate: 'END' }
-              })
-            });
-            
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`Pinecone Embedding Error: ${response.status} ${errText}`);
-            }
-            
-            const resData = await response.json();
-            batchEmbeddings = resData.data.map(d => d.values);
-          } else {
-            const response = await openaiClient.embeddings.create({
-              model: CONFIG.EMBEDDING_MODEL,
-              input: texts,
-            });
-            batchEmbeddings = response.data.map(d => d.embedding);
-          }
-        } catch (error) {
-          attempt++;
-          if (attempt >= CONFIG.MAX_RETRIES) throw error;
-          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt))); // Exponential backoff
-        }
+    const embeddings = await generateEmbeddingsForFiles(files, {
+      onBatchDone: (done) => {
+        const progress = Math.min(50, Math.round((done / files.length) * 50));
+        event.sender.send('clustering-progress', `Generated embeddings for ${done}/${files.length} files... (${progress}%)`);
       }
-      embeddings.push(...batchEmbeddings);
-      
-      // Progress calculation
-      const progress = Math.min(50, Math.round(((i + batch.length) / files.length) * 50));
-      event.sender.send('clustering-progress', `Generated embeddings for ${i + batch.length}/${files.length} files... (${progress}%)`);
-    }
+    });
 
     event.sender.send('clustering-progress', `Running K-Means clustering...`);
     
@@ -613,6 +792,13 @@ ipcMain.handle('cluster-files', async (event, files, numClusters, aiHint) => {
     }
 
     // 4. Name the clusters using LLM
+    let chat;
+    try {
+      chat = getChatClient();
+    } catch (chatConfigError) {
+      logger.error('Chat provider misconfigured, cluster names will fall back to generic labels', chatConfigError);
+    }
+
     const finalClusters = [];
     for (let i = 0; i < numClusters; i++) {
       const fileIndices = clusterGroups[i];
@@ -640,9 +826,10 @@ Respond with a JSON object in this exact format:
 }`;
 
       try {
+        if (!chat) throw new Error('Chat provider not configured');
         await apiRateLimiter.throttle();
-        const response = await openaiClient.chat.completions.create({
-          model: CONFIG.CLUSTERING_MODEL,
+        const response = await chat.client.chat.completions.create({
+          model: chat.model,
           messages: [{ role: 'user', content: prompt }],
           temperature: CONFIG.CLUSTERING_TEMPERATURE,
           response_format: { type: 'json_object' }
@@ -689,9 +876,15 @@ ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, op
   } = options;
   
   const baseOutputFolder = sanitizePath(outputFolder);
-  const sanitizedOutputFolder = namespace 
-    ? path.join(baseOutputFolder, namespace.replace(/[<>:"/\\|?*]/g, '_'))
-    : baseOutputFolder;
+  let sanitizedOutputFolder;
+  try {
+    sanitizedOutputFolder = namespace
+      ? safeJoin(baseOutputFolder, namespace.replace(/[<>:"/\\|?*]/g, '_'))
+      : baseOutputFolder;
+  } catch (pathError) {
+    logger.error('Blocked unsafe namespace path', { namespace, error: pathError.message });
+    return { success: false, error: pathError.message };
+  }
 
   logger.info('Organizing files', {
     outputFolder: sanitizedOutputFolder,
@@ -780,33 +973,43 @@ ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, op
     for (const cluster of clusters) {
       // Per-cluster namespace support
       const currentNamespace = cluster.namespace || namespace;
-      const clusterBaseFolder = currentNamespace 
-        ? path.join(baseOutputFolder, currentNamespace.replace(/[<>:"/\\|?*]/g, '_'))
-        : baseOutputFolder;
-
-      // Create cluster folder
-      const clusterFolderName = cluster.name.replace(/[<>:"/\\|?*]/g, '_');
-      const clusterFolder = path.join(clusterBaseFolder, clusterFolderName);
-      
       const relativeFilePaths = [];
+      let clusterFolder;
+      let clusterFolderName;
 
       try {
+        const clusterBaseFolder = currentNamespace
+          ? safeJoin(baseOutputFolder, currentNamespace.replace(/[<>:"/\\|?*]/g, '_'))
+          : baseOutputFolder;
+
+        // Create cluster folder
+        clusterFolderName = cluster.name.replace(/[<>:"/\\|?*]/g, '_');
+        clusterFolder = safeJoin(clusterBaseFolder, clusterFolderName);
+
         if (!fs.existsSync(clusterFolder)) {
           fs.mkdirSync(clusterFolder, { recursive: true });
           logger.debug('Created cluster folder', { folder: clusterFolder });
         }
       } catch (mkdirError) {
-        logger.error('Failed to create cluster folder', { folder: clusterFolder, error: mkdirError });
-        errors.push({ type: 'mkdir', folder: clusterFolder, error: mkdirError.message });
+        logger.error('Failed to create cluster folder', { cluster: cluster.name, error: mkdirError.message });
+        errors.push({ type: 'mkdir', cluster: cluster.name, error: mkdirError.message });
         continue;
       }
-      
+
       for (const fileIndex of cluster.fileIndices) {
         const file = files[fileIndex];
         if (file) {
           const relPath = preserveRelativePaths && commonRoot ? path.relative(commonRoot, file.path) : file.name;
-          const destDir = path.join(clusterFolder, path.dirname(relPath));
-          const destFileName = path.basename(relPath);
+          let destDir, destFileName, destPath;
+          try {
+            destDir = safeJoin(clusterFolder, path.dirname(relPath));
+            destFileName = path.basename(relPath);
+            destPath = getCollisionFreePath(safeJoin(preserveRelativePaths && commonRoot ? destDir : clusterFolder, destFileName));
+          } catch (pathError) {
+            logger.error('Blocked unsafe destination path', { source: file.path, error: pathError.message });
+            errors.push({ type: mode, source: file.path, error: pathError.message });
+            continue;
+          }
           if (preserveRelativePaths && commonRoot && path.dirname(relPath) !== '.') {
             try {
               fs.mkdirSync(destDir, { recursive: true });
@@ -814,7 +1017,6 @@ ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, op
               logger.warn('Failed to create subdir', { destDir, error: mkdirErr.message });
             }
           }
-          const destPath = getCollisionFreePath(path.join(preserveRelativePaths && commonRoot ? destDir : clusterFolder, destFileName));
           const relativeForManifest = path.join(clusterFolderName, preserveRelativePaths && commonRoot ? relPath : destFileName).replace(/\\/g, '/');
           relativeFilePaths.push(relativeForManifest);
           try {
@@ -977,28 +1179,9 @@ ipcMain.handle('suggest-k', async (event, files) => {
 
   try {
     reportProgress('Generating embeddings for k suggestion...');
-    const embeddings = [];
-    for (let i = 0; i < files.length; i += CONFIG.EMBEDDING_BATCH_SIZE) {
-      const batch = files.slice(i, i + CONFIG.EMBEDDING_BATCH_SIZE);
-      const texts = batch.map(f => getContentForEmbedding(f.content, CONFIG.EMBEDDING_PREVIEW_LENGTH));
-      let attempt = 0;
-      let batchEmbeddings = null;
-      while (attempt < CONFIG.MAX_RETRIES && !batchEmbeddings) {
-        try {
-          await apiRateLimiter.throttle();
-          const response = await openaiClient.embeddings.create({
-            model: CONFIG.EMBEDDING_MODEL,
-            input: texts,
-          });
-          batchEmbeddings = response.data.map(d => d.embedding);
-        } catch (error) {
-          attempt++;
-          if (attempt >= CONFIG.MAX_RETRIES) throw error;
-          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
-        }
-      }
-      embeddings.push(...batchEmbeddings);
-    }
+    // Shared with cluster-files so this respects CONFIG.EMBEDDING_MODEL
+    // (previously always used OpenAI and errored on multilingual-e5-large).
+    const embeddings = await generateEmbeddingsForFiles(files);
 
     const mlKmeans = await import('ml-kmeans');
     const { kmeans } = mlKmeans;

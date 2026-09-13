@@ -2,11 +2,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // API Key management
-  setApiKey: (apiKey, baseURL) => ipcRenderer.invoke('set-api-key', apiKey, baseURL),
+  setApiKey: (apiKey, baseURL, pineconeKey) => ipcRenderer.invoke('set-api-key', apiKey, baseURL, pineconeKey),
   checkEnvApiKey: () => ipcRenderer.invoke('check-env-api-key'),
-  saveApiKey: (apiKey, baseURL) => ipcRenderer.invoke('save-api-key', apiKey, baseURL),
+  saveApiKey: (apiKey, baseURL, pineconeKey) => ipcRenderer.invoke('save-api-key', apiKey, baseURL, pineconeKey),
   loadApiKey: () => ipcRenderer.invoke('load-api-key'),
   deleteApiKey: () => ipcRenderer.invoke('delete-api-key'),
+  setEmbeddingModel: (modelName) => ipcRenderer.invoke('set-embedding-model', modelName),
+  getProviderConfig: () => ipcRenderer.invoke('get-provider-config'),
+  setChatProvider: (providerName) => ipcRenderer.invoke('set-chat-provider', providerName),
+  setEmbeddingProvider: (providerName) => ipcRenderer.invoke('set-embedding-provider', providerName),
   
   // File/Folder selection
   selectFolder: () => ipcRenderer.invoke('select-folder', { multiSelections: true }),

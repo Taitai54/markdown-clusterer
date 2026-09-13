@@ -1,6 +1,22 @@
 import React, { useState } from 'react';
 
-function Header({ apiKeySet, onApiKeyClick, fileCount }) {
+const PROVIDER_LABELS = {
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  gemini: 'Gemini',
+  local: 'Local (Ollama)',
+};
+
+function Header({
+  apiKeySet,
+  onApiKeyClick,
+  fileCount,
+  chatProvider,
+  embeddingProvider,
+  providerOptions,
+  onChatProviderChange,
+  onEmbeddingProviderChange,
+}) {
   const [showDebugMenu, setShowDebugMenu] = useState(false);
 
   const handleOpenLogs = async () => {
@@ -80,7 +96,39 @@ function Header({ apiKeySet, onApiKeyClick, fileCount }) {
             {fileCount} file{fileCount !== 1 ? 's' : ''} loaded
           </span>
         )}
-        
+
+        {providerOptions && (
+          <div className="flex items-center gap-2 bg-dark-200 px-2 py-1.5 rounded-lg border border-gray-700 text-xs">
+            <label className="flex items-center gap-1" title="Backend used to name clusters">
+              <span className="text-gray-500">Naming:</span>
+              <select
+                value={chatProvider}
+                onChange={(e) => onChatProviderChange(e.target.value)}
+                className="bg-dark-100 border border-gray-600 rounded px-1 py-0.5 text-gray-300"
+                aria-label="Cluster naming provider"
+              >
+                {providerOptions.chat.map((p) => (
+                  <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>
+                ))}
+              </select>
+            </label>
+            <div className="w-px h-4 bg-gray-600"></div>
+            <label className="flex items-center gap-1" title="Backend used for embeddings — this drives the actual clustering">
+              <span className="text-gray-500">Embeddings:</span>
+              <select
+                value={embeddingProvider}
+                onChange={(e) => onEmbeddingProviderChange(e.target.value)}
+                className="bg-dark-100 border border-gray-600 rounded px-1 py-0.5 text-gray-300"
+                aria-label="Embedding provider"
+              >
+                {providerOptions.embedding.map((p) => (
+                  <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+
         <button
           onClick={onApiKeyClick}
           className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${

@@ -30,6 +30,9 @@ const initialState = {
   namespace: '',          // Pinecone namespace
   embeddingModel: 'text-embedding-3-small',
   embeddings: [],         // Raw embeddings for similarity checks
+  chatProvider: 'openai',
+  embeddingProvider: 'openai',
+  providerOptions: { chat: ['openai'], embedding: ['openai'] },
 };
 
 function appReducer(state, action) {
@@ -164,6 +167,17 @@ function appReducer(state, action) {
       };
     case 'SET_EMBEDDING_MODEL':
       return { ...state, embeddingModel: action.payload };
+    case 'SET_PROVIDER_CONFIG':
+      return {
+        ...state,
+        chatProvider: action.payload.chatProvider,
+        embeddingProvider: action.payload.embeddingProvider,
+        providerOptions: { chat: action.payload.chatOptions, embedding: action.payload.embeddingOptions },
+      };
+    case 'SET_CHAT_PROVIDER':
+      return { ...state, chatProvider: action.payload };
+    case 'SET_EMBEDDING_PROVIDER':
+      return { ...state, embeddingProvider: action.payload };
     default:
       return state;
   }
@@ -171,7 +185,7 @@ function appReducer(state, action) {
 
 function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
-  const { apiKeySet, showApiModal, files, clusters, isProcessing, processingStep, numClusters, outputFolder, organized, error, orgMode, injectTags, writeManifest, writeClusterIndex, injectClusterDescription, preserveRelativePaths, isGlobalDragging, aiHint, dedupFolder, dedupSkipped, namespace, embeddingModel } = state;
+  const { apiKeySet, showApiModal, files, clusters, isProcessing, processingStep, numClusters, outputFolder, organized, error, orgMode, injectTags, writeManifest, writeClusterIndex, injectClusterDescription, preserveRelativePaths, isGlobalDragging, aiHint, dedupFolder, dedupSkipped, namespace, embeddingModel, embeddings, chatProvider, embeddingProvider, providerOptions } = state;
 
   // Update suggested clusters when files change
   useEffect(() => {
@@ -206,6 +220,15 @@ function App() {
     initApiKey();
   }, []);
 
+  // Load current provider config (from .env, or a prior in-app switch) on startup
+  useEffect(() => {
+    if (window.electronAPI?.getProviderConfig) {
+      window.electronAPI.getProviderConfig().then((config) => {
+        dispatch({ type: 'SET_PROVIDER_CONFIG', payload: config });
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onProgress) {
       const handleProgress = (event, msg) => {
@@ -233,6 +256,24 @@ function App() {
       }
     } catch (err) {
       dispatch({ type: 'SET_ERROR', payload: 'Failed to set API key: ' + err.message });
+    }
+  };
+
+  const handleChatProviderChange = async (providerName) => {
+    const result = await window.electronAPI.setChatProvider(providerName);
+    if (result.success) {
+      dispatch({ type: 'SET_CHAT_PROVIDER', payload: providerName });
+    } else {
+      dispatch({ type: 'SET_ERROR', payload: result.error || 'Failed to switch naming provider' });
+    }
+  };
+
+  const handleEmbeddingProviderChange = async (providerName) => {
+    const result = await window.electronAPI.setEmbeddingProvider(providerName);
+    if (result.success) {
+      dispatch({ type: 'SET_EMBEDDING_PROVIDER', payload: providerName });
+    } else {
+      dispatch({ type: 'SET_ERROR', payload: result.error || 'Failed to switch embedding provider' });
     }
   };
 
@@ -432,6 +473,11 @@ function App() {
         apiKeySet={apiKeySet}
         onApiKeyClick={() => dispatch({ type: 'SHOW_API_MODAL', payload: true })}
         fileCount={files.length}
+        chatProvider={chatProvider}
+        embeddingProvider={embeddingProvider}
+        providerOptions={providerOptions}
+        onChatProviderChange={handleChatProviderChange}
+        onEmbeddingProviderChange={handleEmbeddingProviderChange}
       />
 
       <main className="flex-1 overflow-hidden p-6">

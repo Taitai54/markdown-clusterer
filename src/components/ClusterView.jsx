@@ -380,6 +380,7 @@ function ClusterView({
                   {cluster.fileIndices.length} files
                 </span>
                 {clusters.length > 1 && (
+                  <div className="relative flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => checkClusterDuplicates(clusterIndex)}
