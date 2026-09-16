@@ -4,19 +4,22 @@ Use the launchers from anywhere (e.g. desktop) and optionally give the shortcut 
 
 ## Launchers
 
-- **Windows:** `launch.bat`  
-  - Run the built app from `release\win-unpacked\Markdown Clusterer.exe` if it exists (no terminal window).  
+- **Windows:** `launch.bat` or `markdowncluster.bat`  
+  - Runs the built app from `release\win-unpacked\Markdown Clusterer.exe` if it exists (no terminal window).  
   - Otherwise runs `npm run dev` (needs Node; terminal stays open).
+- **macOS:** `markdowncluster.command` (double-click in Finder)  
+  - Opens Terminal and runs `launch.sh`.  
+  - Prefers a built `.app` under `release/mac-arm64`, `release/mac`, or `release/mac-unpacked`.  
+  - Otherwise runs `npm run dev` (installs `node_modules` on first run if needed).
 - **macOS / Linux:** `launch.sh`  
-  - Run the built app (`.app` on Mac, `.AppImage` on Linux) if present.  
-  - Otherwise runs `npm run dev`.  
-  - Make executable once: `chmod +x launch.sh`
+  - Same logic as above; use from Terminal or as the backend for the `.command` file.  
+  - Make executable once: `chmod +x launch.sh markdowncluster.command`
 
 ## Create a desktop shortcut
 
 ### Windows
 
-1. Right‑click `launch.bat` → **Create shortcut**.
+1. Right‑click `launch.bat` (or `markdowncluster.bat`) → **Create shortcut**.
 2. Move the shortcut to the Desktop (or drag it there).
 3. (Optional) Right‑click the shortcut → **Properties**:
    - **Target:** leave as is (it runs the batch file from its folder).
@@ -30,10 +33,11 @@ Use the launchers from anywhere (e.g. desktop) and optionally give the shortcut 
 
 ### macOS
 
-1. Drag `launch.sh` to the Desktop (or make an alias).
-2. To run it: double‑click → if needed, confirm in Security & Privacy that it’s allowed to run, or run from Terminal once:  
-   `chmod +x /path/to/launch.sh`
-3. For a “books” icon: Get a PNG or ICNS, then Get Info on the script → drag the image onto the icon in the top‑left of the Get Info window (some macOS versions allow this for scripts/aliases).
+1. Make the launcher executable once (Terminal):  
+   `chmod +x launch.sh markdowncluster.command`
+2. Double‑click `markdowncluster.command` in Finder, or drag it (or an alias) to the Desktop / Dock.
+3. If macOS blocks it: right‑click → **Open**, or allow it in **System Settings → Privacy & Security**.
+4. Optional icon: Get Info on the `.command` file → drag a PNG/ICNS onto the icon in the top‑left.
 
 ### Linux
 

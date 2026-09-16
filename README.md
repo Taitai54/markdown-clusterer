@@ -46,8 +46,11 @@ npm install
 npm run dev
 ```
 
-**Built app (Windows):**  
-After `npm run build:win`, run `release\win-unpacked\Markdown Clusterer.exe`, or use the included `launch.bat` (see [DESKTOP_LAUNCH.md](DESKTOP_LAUNCH.md) for a desktop shortcut).
+**Quick launchers:**
+- **macOS:** double-click `markdowncluster.command` (or run `./launch.sh`)
+- **Windows:** run `launch.bat` or `markdowncluster.bat`
+
+See [DESKTOP_LAUNCH.md](DESKTOP_LAUNCH.md) for desktop shortcuts and icons.
 
 **Build for your platform:**
 ```bash
