@@ -1,4 +1,7 @@
-import React, { useReducer, useEffect } from 'react';
+import React, { useReducer, useEffect, useState, useMemo } from 'react';
+import {useRecovery} from './hooks/useRecovery';
+import ExportPreview from './components/ExportPreview';
+import LibraryBar from './components/LibraryBar';
 import ApiKeyModal from './components/ApiKeyModal';
 import FileDropZone from './components/FileDropZone';
 import FileList from './components/FileList';
@@ -8,6 +11,7 @@ import ProgressModal from './components/ProgressModal';
 
 const initialState = {
   apiKeySet: false,
+  offlineMode: false,
   showApiModal: true,
   files: [],
   clusters: [],
@@ -37,21 +41,23 @@ const initialState = {
 
 function appReducer(state, action) {
   switch (action.type) {
+    case 'RESTORE_PROJECT':
+      return { ...state, ...action.payload, embeddings: [], organized: false, error: '', dedupFolder: '', dedupSkipped: 0 };
     case 'SET_API_KEY_STATUS':
       return { ...state, apiKeySet: action.payload };
     case 'SHOW_API_MODAL':
       return { ...state, showApiModal: action.payload };
     case 'SET_FILES':
-      return { ...state, files: action.payload, clusters: [], organized: false };
+      return { ...state, files: action.payload, clusters: [], embeddings: [], organized: false };
     case 'ADD_FILES': {
       const existingPaths = new Set(state.files.map(f => f.path));
       const newFiles = action.payload.filter(f => !existingPaths.has(f.path));
-      return { ...state, files: [...state.files, ...newFiles], clusters: [], organized: false };
+      return { ...state, files: [...state.files, ...newFiles], clusters: [], embeddings: [], organized: false };
     }
     case 'REMOVE_FILE':
-      return { ...state, files: state.files.filter((_, i) => i !== action.payload), clusters: [], organized: false };
+      return { ...state, files: state.files.filter((_, i) => i !== action.payload), clusters: [], embeddings: [], organized: false };
     case 'CLEAR_FILES':
-      return { ...state, files: [], clusters: [], organized: false };
+      return { ...state, files: [], clusters: [], embeddings: [], organized: false };
     case 'SET_CLUSTERS':
       return { ...state, clusters: action.payload.clusters, embeddings: action.payload.embeddings || state.embeddings };
     case 'SET_PROCESSING':
@@ -103,7 +109,7 @@ function appReducer(state, action) {
         }
         filtered.push(f);
       }
-      return { ...state, files: filtered, dedupFolder: folderPath, dedupSkipped: skipped, clusters: [], organized: false };
+      return { ...state, files: filtered, dedupFolder: folderPath, dedupSkipped: skipped, clusters: [], embeddings: [], organized: false };
     }
     case 'MOVE_FILE': {
       const { fileIndex, fromClusterIndex, toClusterIndex } = action.payload;
@@ -171,6 +177,7 @@ function appReducer(state, action) {
       return {
         ...state,
         chatProvider: action.payload.chatProvider,
+        offlineMode: action.payload.offlineMode,
         embeddingProvider: action.payload.embeddingProvider,
         providerOptions: { chat: action.payload.chatOptions, embedding: action.payload.embeddingOptions },
       };
@@ -187,9 +194,103 @@ function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const { apiKeySet, showApiModal, files, clusters, isProcessing, processingStep, numClusters, outputFolder, organized, error, orgMode, injectTags, writeManifest, writeClusterIndex, injectClusterDescription, preserveRelativePaths, isGlobalDragging, aiHint, dedupFolder, dedupSkipped, namespace, embeddingModel, embeddings, chatProvider, embeddingProvider, providerOptions } = state;
 
+  const [libraryItems, setLibraryItems] = useState({projects:[],categories:[]});
+  const [history, setHistory] = useState([]);
+  const [project, setProject] = useState({id:null,name:''});
+  const [savedSnapshot, setSavedSnapshot] = useState('');
+  const [notice, setNotice] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [cancellable,setCancellable]=useState(false);
+  const [cancelling,setCancelling]=useState(false);
+  const projectState = useMemo(() => Object.fromEntries(['files','clusters','numClusters','outputFolder','orgMode','injectTags','writeManifest','writeClusterIndex','injectClusterDescription','preserveRelativePaths','aiHint','namespace'].map(k=>[k,state[k]])),[files,clusters,numClusters,outputFolder,orgMode,injectTags,writeManifest,writeClusterIndex,injectClusterDescription,preserveRelativePaths,aiHint,namespace]);
+  const snapshot = useMemo(()=>JSON.stringify(projectState),[projectState]);
+  const dirty = snapshot !== savedSnapshot && (!!files.length || !!project.id);
+  const recovery = useRecovery({snapshot,project,dirty,busy:isProcessing});
+  const restoreDraft = () => {
+    dispatch({type:'RESTORE_PROJECT',payload:recovery.pending.data});
+    setProject(recovery.pending.project || {id:null,name:''});setSavedSnapshot('');
+    setNotice(recovery.pending.warnings?.length ? `Recovered your edits. Source files need attention: ${recovery.pending.warnings.join('; ')}` : 'Recovered your unsaved work. Save the project when ready.');
+    recovery.recovered();
+  };
+  const cancelTask = async () => {
+    setCancelling(true);
+    try {await window.electronAPI.cancelJob();}
+    catch(e){setCancelling(false);dispatch({type:'SET_ERROR',payload:e.message});}
+  };
+  const refreshLibrary = async () => {
+    const [items, exports] = await Promise.all([window.electronAPI.listLibrary(),window.electronAPI.exportHistory()]);
+    if(items.success) setLibraryItems(items);
+    if(exports.success) setHistory(exports.items);
+  };
+  useEffect(() => { if(window.electronAPI?.listLibrary) refreshLibrary().catch(e=>setNotice(e.message)); },[]);
+  useEffect(() => {
+    const protect = e => { if(dirty) { e.preventDefault(); e.returnValue=''; } };
+    window.addEventListener('beforeunload',protect);
+    return () => window.removeEventListener('beforeunload',protect);
+  },[dirty]);
+  const productAction = async (action, canCancel=false) => {
+    setCancellable(false);setCancelling(false);
+    dispatch({type:'SET_PROCESSING',payload:true});
+    await recovery.flush();
+    setCancellable(canCancel);
+    dispatch({type:'SET_PROCESSING_STEP',payload:'Working on your library…'});
+    dispatch({type:'SET_ERROR',payload:''}); setNotice('');
+    try { await action(); } catch(e) { if(e.cancelled)setNotice('Cancelled. Your previous groups are unchanged.');else dispatch({type:'SET_ERROR',payload:e.message}); }
+    finally { dispatch({type:'SET_PROCESSING',payload:false});setCancellable(false);setCancelling(false); }
+  };
+  const requireSuccess = result => {if(!result.success) throw Object.assign(new Error(result.error),{cancelled:result.cancelled});return result;};
+  const saveProject = name => productAction(async()=>{
+    if(!name?.trim()) throw new Error('Enter a project name');
+    const result=requireSuccess(await window.electronAPI.saveProject(name,projectState,project.name===name ? project.id : undefined));
+    setProject(result);setSavedSnapshot(snapshot);setNotice('Project saved on this computer.');await refreshLibrary();
+  });
+  const openProject = id => {
+    if(dirty && !window.confirm('Discard unsaved changes and open this project?'))return;
+    productAction(async()=>{
+      const {project:loaded}=requireSuccess(await window.electronAPI.openProject(id));
+      dispatch({type:'RESTORE_PROJECT',payload:loaded.data});setProject({id:loaded.id,name:loaded.name});setSavedSnapshot(JSON.stringify(loaded.data));
+      setNotice(loaded.warnings.length ? `Project restored from its saved snapshot. Reload changed or missing source files before export. ${loaded.warnings.join('; ')}` : 'Project restored. Model settings stay as currently configured.');
+    });
+  };
+  const newProject = () => {
+    if(dirty && !window.confirm('Discard unsaved changes and start a new project?'))return;
+    const clean=Object.fromEntries(Object.keys(projectState).map(k=>[k,initialState[k]]));
+    dispatch({type:'RESTORE_PROJECT',payload:clean});setProject({id:null,name:''});setSavedSnapshot(JSON.stringify(clean));setNotice('');
+  };
+  const saveCategories = name => productAction(async()=>{
+    requireSuccess(await window.electronAPI.saveCategories(name,projectState));await refreshLibrary();setNotice('Category set saved with representative examples.');
+  });
+  const applyCategories = (id,threshold) => {
+    if(clusters.length && !window.confirm('Replace current groups with suggestions from the saved categories?'))return;
+    productAction(async()=>{
+      const result=requireSuccess(await window.electronAPI.applyCategories(id,files,threshold));
+      dispatch({type:'SET_CLUSTERS',payload:result});dispatch({type:'SET_ORGANIZED',payload:false});setNotice('Category suggestions ready. Review all assignments, especially Uncertain.');
+    },true);
+  };
+  const undoExport = id => {
+    if(!window.confirm('Undo this export? Unchanged exported copies will be removed; moved originals and replaced indexes will be restored.'))return;
+    productAction(async()=>{
+      const result=requireSuccess(await window.electronAPI.undoExport(id));
+      if(result.mode==='move' && files.some(f=>result.restored.some(r=>r.destination===f.path))) {
+        const paths=files.map(f=>result.restored.find(r=>r.destination===f.path)?.source || f.path);
+        const loaded=requireSuccess(await window.electronAPI.readFiles(paths));
+        if(loaded.files.length===files.length)dispatch({type:'RESTORE_PROJECT',payload:{...projectState,files:loaded.files}});
+      }
+      await refreshLibrary();dispatch({type:'SET_ORGANIZED',payload:false});setNotice('Export undone. Empty output folders are left in place.');
+    });
+  };
+
+  const reloadSources = () => {
+    if(!window.confirm('Reload files from disk and clear current groups? Save your reviewed categories first if you want to reuse them.'))return;
+    productAction(async()=>{
+      const loaded=requireSuccess(await window.electronAPI.readFiles(files.map(f=>f.path)));
+      dispatch({type:'SET_FILES',payload:loaded.files});setNotice(`Reloaded ${loaded.files.length} of ${files.length} files. Missing files were skipped; group again or apply saved categories.`);
+    });
+  };
+
   // Update suggested clusters when files change
   useEffect(() => {
-    if (files.length > 0 && window.electronAPI) {
+    if (files.length > 0 && !project.id && window.electronAPI) {
       window.electronAPI.suggestClusters(files.length).then((val) => {
         dispatch({ type: 'SET_NUM_CLUSTERS', payload: val });
       });
@@ -247,16 +348,26 @@ function App() {
     try {
       const result = await window.electronAPI.setApiKey(apiKey, baseURL, pineconeKey);
       if (result.success) {
-        await window.electronAPI.saveApiKey(apiKey, baseURL, pineconeKey);
+        const saved = await window.electronAPI.saveApiKey(apiKey, baseURL, pineconeKey);
         dispatch({ type: 'SET_API_KEY_STATUS', payload: true });
         dispatch({ type: 'SHOW_API_MODAL', payload: false });
-        dispatch({ type: 'SET_ERROR', payload: '' });
+        dispatch({ type: 'SET_ERROR', payload: saved.success ? '' : saved.error });
       } else {
         dispatch({ type: 'SET_ERROR', payload: result.error || 'Invalid API key' });
       }
     } catch (err) {
       dispatch({ type: 'SET_ERROR', payload: 'Failed to set API key: ' + err.message });
     }
+  };
+
+  const handleLocalSubmit = async (settings) => {
+    const result = await window.electronAPI.configureLocal(settings);
+    if (!result.success) throw new Error(result.error);
+    const config = await window.electronAPI.getProviderConfig();
+    dispatch({ type: 'SET_PROVIDER_CONFIG', payload: config });
+    dispatch({ type: 'SET_API_KEY_STATUS', payload: true });
+    dispatch({ type: 'SHOW_API_MODAL', payload: false });
+    dispatch({ type: 'SET_ERROR', payload: '' });
   };
 
   const handleChatProviderChange = async (providerName) => {
@@ -272,6 +383,7 @@ function App() {
     const result = await window.electronAPI.setEmbeddingProvider(providerName);
     if (result.success) {
       dispatch({ type: 'SET_EMBEDDING_PROVIDER', payload: providerName });
+      dispatch({ type: 'SET_API_KEY_STATUS', payload: true });
     } else {
       dispatch({ type: 'SET_ERROR', payload: result.error || 'Failed to switch embedding provider' });
     }
@@ -317,11 +429,14 @@ function App() {
     }
 
     dispatch({ type: 'SET_PROCESSING', payload: true });
+    await recovery.flush();
+    setCancellable(true);setCancelling(false);
     dispatch({ type: 'SET_PROCESSING_STEP', payload: 'Analyzing file contents with AI...' });
     dispatch({ type: 'SET_ERROR', payload: '' });
 
     try {
       const result = await window.electronAPI.clusterFiles(files, numClusters, aiHint);
+      if(result.cancelled){setNotice('Cancelled. Your previous groups are unchanged.');return;}
       if (result.success) {
         dispatch({ type: 'SET_CLUSTERS', payload: { clusters: result.clusters, embeddings: result.embeddings } });
         dispatch({ type: 'SET_PROCESSING_STEP', payload: '' });
@@ -331,6 +446,7 @@ function App() {
     } catch (err) {
       dispatch({ type: 'SET_ERROR', payload: 'Clustering failed: ' + err.message });
     } finally {
+      setCancellable(false);setCancelling(false);
       dispatch({ type: 'SET_PROCESSING', payload: false });
     }
   };
@@ -341,10 +457,13 @@ function App() {
       return;
     }
     dispatch({ type: 'SET_PROCESSING', payload: true });
+    await recovery.flush();
+    setCancellable(true);setCancelling(false);
     dispatch({ type: 'SET_PROCESSING_STEP', payload: 'Analyzing structure to suggest cluster count...' });
     dispatch({ type: 'SET_ERROR', payload: '' });
     try {
       const result = await window.electronAPI.suggestK(files);
+      if(result.cancelled){setNotice('Cancelled. Your cluster count is unchanged.');return;}
       const k = result.suggestedK != null ? result.suggestedK : numClusters;
       dispatch({ type: 'SET_NUM_CLUSTERS', payload: Math.max(2, Math.min(15, k)) });
       if (result.success) {
@@ -355,6 +474,7 @@ function App() {
     } catch (err) {
       dispatch({ type: 'SET_ERROR', payload: 'Suggest k failed: ' + err.message });
     } finally {
+      setCancellable(false);setCancelling(false);
       dispatch({ type: 'SET_PROCESSING', payload: false });
     }
   };
@@ -370,7 +490,7 @@ function App() {
     e.preventDefault();
     dispatch({ type: 'SET_GLOBAL_DRAGGING', payload: false });
     if (e.dataTransfer && e.dataTransfer.files) {
-      const paths = Array.from(e.dataTransfer.files).map(f => f.path).filter(Boolean);
+      const paths = Array.from(e.dataTransfer.files).map(f => window.electronAPI.getPathForFile(f)).filter(Boolean);
       if (paths.length > 0) {
         handleProcessPaths(paths);
       }
@@ -400,38 +520,24 @@ function App() {
     }
   };
 
-  const handleOrganize = async () => {
-    if (!outputFolder) {
-      dispatch({ type: 'SET_ERROR', payload: 'Please select an output folder first' });
-      return;
+  const handleOrganize = () => productAction(async()=>{
+    if(!outputFolder)throw new Error('Please select an output folder first');
+    const result=requireSuccess(await window.electronAPI.previewExport(outputFolder,clusters,files,{
+      mode:orgMode,injectTags,writeManifest,writeClusterIndex,injectClusterDescription,preserveRelativePaths,namespace
+    }));
+    setPreview(result.plan);
+  });
+  const commitExport = () => productAction(async()=>{
+    const id=preview.id;const mode=preview.mode;setPreview(null);
+    const result=await window.electronAPI.commitExport(id);
+    await refreshLibrary();requireSuccess(result);
+    if(mode==='move') {
+      const paths=files.map(f=>result.results.find(r=>r.source===f.path)?.destination || f.path);
+      const loaded=requireSuccess(await window.electronAPI.readFiles(paths));
+      if(loaded.files.length===files.length)dispatch({type:'RESTORE_PROJECT',payload:{...projectState,files:loaded.files}});
     }
-
-    dispatch({ type: 'SET_PROCESSING', payload: true });
-    dispatch({ type: 'SET_PROCESSING_STEP', payload: 'Organizing files into folders...' });
-    dispatch({ type: 'SET_ERROR', payload: '' });
-
-    try {
-      const result = await window.electronAPI.organizeFiles(outputFolder, clusters, files, { 
-        mode: orgMode, 
-        injectTags, 
-        writeManifest, 
-        writeClusterIndex, 
-        injectClusterDescription, 
-        preserveRelativePaths,
-        namespace 
-      });
-      if (result.success) {
-        dispatch({ type: 'SET_ORGANIZED', payload: true });
-        dispatch({ type: 'SET_PROCESSING_STEP', payload: '' });
-      } else {
-        dispatch({ type: 'SET_ERROR', payload: result.error });
-      }
-    } catch (err) {
-      dispatch({ type: 'SET_ERROR', payload: 'Organization failed: ' + err.message });
-    } finally {
-      dispatch({ type: 'SET_PROCESSING', payload: false });
-    }
-  };
+    dispatch({type:'SET_ORGANIZED',payload:true});setNotice('Export complete. Undo is available in Export history, including after restarting.');
+  });
 
   const handleMoveFile = (fileIndex, fromClusterIndex, toClusterIndex) => {
     dispatch({ type: 'MOVE_FILE', payload: { fileIndex, fromClusterIndex, toClusterIndex } });
@@ -470,6 +576,7 @@ function App() {
       )}
 
       <Header
+        offlineMode={state.offlineMode}
         apiKeySet={apiKeySet}
         onApiKeyClick={() => dispatch({ type: 'SHOW_API_MODAL', payload: true })}
         fileCount={files.length}
@@ -480,6 +587,15 @@ function App() {
         onEmbeddingProviderChange={handleEmbeddingProviderChange}
       />
 
+      <LibraryBar items={libraryItems} history={history} dirty={dirty} projectName={project.name} busy={isProcessing} hasFiles={!!files.length} hasClusters={!!clusters.length} onSave={saveProject} onOpen={openProject} onNew={newProject} onSaveCategories={saveCategories} onApply={applyCategories} onUndo={undoExport} onImport={handleSelectFiles} onReload={reloadSources} onClearCache={()=>productAction(async()=>{requireSuccess(await window.electronAPI.clearEmbeddingCache());setNotice('Embedding cache cleared. The next run will generate fresh vectors.');})}/>
+      {recovery.status && <p role="status" className="px-6 text-xs text-gray-400">{recovery.status}</p>}
+      {recovery.pending && <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6"><section role="dialog" aria-modal="true" aria-labelledby="recovery-title" className="p-6 bg-dark-100 rounded-xl border border-gray-600 max-w-lg">
+        <h2 id="recovery-title" className="text-xl font-bold">Recover unsaved work?</h2>
+        <p className="my-4">{recovery.pending.error ? `Recovery snapshot could not be read: ${recovery.pending.error}` : `A recovery copy from ${new Date(recovery.pending.updatedAt).toLocaleString()} is available. Recover it before starting a new session.`}</p>
+        <div className="flex gap-3"><button className="px-4 py-2 bg-dark-300 rounded" onClick={()=>recovery.dismiss().catch(e=>dispatch({type:'SET_ERROR',payload:e.message}))}>Discard recovery copy</button>{!recovery.pending.error && <button autoFocus className="px-4 py-2 bg-primary-600 rounded" onClick={restoreDraft}>Recover work</button>}</div>
+      </section></div>}
+      {notice && <div role="status" className="px-6 py-2 text-sm bg-blue-900/30 text-blue-200 max-h-24 overflow-auto">{notice}</div>}
+      {preview && <ExportPreview plan={preview} onCancel={()=>setPreview(null)} onConfirm={commitExport}/>}
       <main className="flex-1 overflow-hidden p-6">
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-500/50 rounded-lg text-red-300">
@@ -608,7 +724,8 @@ function App() {
             setNamespace={(val) => dispatch({ type: 'SET_NAMESPACE', payload: val })}
             embeddingModel={embeddingModel}
             setEmbeddingModel={async (val) => {
-              await window.electronAPI.setEmbeddingModel(val);
+              const result = await window.electronAPI.setEmbeddingModel(val);
+              if (!result.success) { dispatch({ type: 'SET_ERROR', payload: result.error }); return; }
               dispatch({ type: 'SET_EMBEDDING_MODEL', payload: val });
             }}
             onSelectOutputFolder={handleSelectOutputFolder}
@@ -618,7 +735,7 @@ function App() {
             onSetClusterNamespace={(index, ns) => dispatch({ type: 'SET_CLUSTER_NAMESPACE', payload: { index, namespace: ns } })}
             onMergeClusters={handleMergeClusters}
             onSplitCluster={handleSplitCluster}
-            onRecluster={() => dispatch({ type: 'SET_CLUSTERS', payload: [] })}
+            onRecluster={() => dispatch({ type: 'SET_CLUSTERS', payload: { clusters: [], embeddings: [] } })}
           />
         )}
       </main>
@@ -626,14 +743,16 @@ function App() {
       {showApiModal && (
         <ApiKeyModal
           onSubmit={handleApiKeySubmit}
-          onClose={() => apiKeySet && dispatch({ type: 'SHOW_API_MODAL', payload: false })}
+          onCloudEnabled={() => window.electronAPI.getProviderConfig().then(config => dispatch({ type: 'SET_PROVIDER_CONFIG', payload: config }))}
+          onLocal={handleLocalSubmit}
+          onClose={() => dispatch({ type: 'SHOW_API_MODAL', payload: false })}
           error={error}
           isSet={apiKeySet}
         />
       )}
 
       {isProcessing && (
-        <ProgressModal step={processingStep} />
+        <ProgressModal step={processingStep} onCancel={cancellable ? cancelTask : undefined} cancelling={cancelling} />
       )}
     </div>
   );

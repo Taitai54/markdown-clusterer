@@ -13,6 +13,7 @@ export default defineConfig({
     strictPort: true
   },
   test: {
+    include: ['src/**/*.test.{js,jsx}'],
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/setupTests.js',

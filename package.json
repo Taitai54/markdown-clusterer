@@ -12,7 +12,12 @@
     "build:win": "vite build && electron-builder --win",
     "build:linux": "vite build && electron-builder --linux",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:offline": "node --test scripts/offline.test.cjs",
+    "smoke:local": "node scripts/smoke-local.cjs",
+    "build:mac:dir": "vite build && electron-builder --mac --dir",
+    "test:product": "node --test scripts/product.test.cjs",
+    "test:resilience": "node --test scripts/resilience.test.cjs"
   },
   "build": {
     "appId": "com.markdown-clusterer.app",
@@ -62,7 +67,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
-    "electron": "^28.0.0",
+    "electron": "^44.4.3",
     "electron-builder": "^24.9.1",
     "jsdom": "^29.0.1",
     "postcss": "^8.4.32",

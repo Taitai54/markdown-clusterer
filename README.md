@@ -1,126 +1,66 @@
 # Markdown Clusterer
 
-An AI-powered desktop app that organizes markdown files into topic-based clusters using AI embeddings and K-Means clustering. Built with Electron and React for Mac, Windows, and Linux.
+A local Electron/React desktop app for grouping Markdown and text files into topics, reviewing those groups, and copying or moving files into organized folders. It supports local Ollama models and optional cloud providers.
 
-![Platform](https://img.shields.io/badge/Platform-Mac%20%7C%20Windows%20%7C%20Linux-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+## Start on this Mac
 
-## ✨ Key Features
-
-- **AI-Powered Clustering**: Groups files using OpenAI or Pinecone E5 embeddings (2–15 clusters).
-- **Multi-Provider Naming**: Cluster names/descriptions can be generated via OpenAI, OpenRouter, Gemini, or a local model — see [Choosing a provider](#choosing-a-provider).
-- **Pinecone Alignment**: Native support for embedding with `multilingual-e5-large` (1024d) to match the Pinecone 'peace' index's vector space. This app doesn't upload to a Pinecone index itself — "namespace" here just means the local folder/frontmatter label you'd later import under that namespace.
-- **Dynamic Namespaces**: Assign a namespace label to clusters on the fly; it becomes a subfolder and gets written into file frontmatter.
-- **Contextual Injection**: Automatically bakes cluster descriptions and namespace metadata into markdown frontmatter.
-- **Semantic Overlap Detection**: Identifies and flags files with >92% semantic similarity to minimize database noise.
-- **Interactive GUI**: Drag-and-drop file organization with real-time AI naming.
-- **Flexible Organization**: Copy or Move modes with folder structure preservation.
-- **Suggest k** — Optional "Suggest k" uses the elbow method to suggest number of clusters
-- **Organize output** — Copy or move files into cluster folders; optional YAML tags, cluster meta, index manifest, per-cluster `_index.md`, and preserve relative paths
-- **Duplicate filtering** — "Filter Already Organised" removes files already organised into a target folder in a previous run, so re-exporting a full knowledge base only processes new or updated files
-- **Cross-platform** — Runs on macOS, Windows, and Linux
-- **API key** — At least one provider key ([platform.openai.com](https://platform.openai.com), [openrouter.ai](https://openrouter.ai), [aistudio.google.com](https://aistudio.google.com/apikey), or a local Ollama install)
-
-## Choosing a provider
-
-Two dropdowns in the header — **Naming** and **Embeddings** — switch providers at runtime, no `.env` edit or restart needed. They start from whatever `.env` sets and can be changed per-session from there. Both are OpenAI-API-compatible under the hood, so the app reuses one client per provider — just a different key/base URL. See `.env.example` for the full variable list (still the way to set your *default* provider and per-provider API keys/models).
-
-- **`CHAT_PROVIDER`** (`openai` | `openrouter` | `gemini` | `local`) — names your clusters. `local` uses Ollama by default (`OLLAMA_BASE_URL`); the model name (`OLLAMA_CHAT_MODEL`) must exactly match an installed tag (`ollama list`) — `llama3.2` fails, `llama3.2:3b` doesn't.
-- **`EMBEDDING_PROVIDER`** (`openai` | `gemini` | `openrouter` | `local`) — this is what actually groups your files; naming is cosmetic by comparison. Worth having a fallback here since it's the one that breaks clustering entirely if the key runs dry. Verified working: OpenAI (`text-embedding-3-small`), Gemini (`gemini-embedding-001` — note `text-embedding-004` 404s on Gemini's OpenAI-compat endpoint), OpenRouter (`openai/text-embedding-3-small`, billed through OpenRouter), local via Ollama (`nomic-embed-text`, 768d — the only option with no quota ceiling at all, since it never leaves your machine). Local needs a dedicated embedding model pulled first — chat models like `llama3.2` don't do embeddings: `ollama pull nomic-embed-text`.
-- Selecting `multilingual-e5-large` from the in-app embedding-model dropdown still routes through Pinecone regardless of `EMBEDDING_PROVIDER` (a Pinecone key is required for that specific choice).
-
-The custom "Base URL" field in the API key modal is a manual override for the OpenAI client specifically (e.g. pointing it at a local OpenAI-compatible server); it sends whatever key you enter to that URL, so only point it at endpoints you trust.
-
-## Installation
-
-```bash
-git clone https://github.com/YOUR_USERNAME/markdown-clusterer.git
-cd markdown-clusterer
+```sh
 npm install
-```
-
-## Running the app
-
-**Development (see logs in terminal):**
-```bash
 npm run dev
 ```
 
-**Quick launchers:**
-- **macOS:** double-click `markdowncluster.command` (or run `./launch.sh`)
-- **Windows:** run `launch.bat` or `markdowncluster.bat`
+Open **Model settings**, use `http://127.0.0.1:11434/v1`, embedding model `bge-m3:latest`, and naming model `gpt-oss:20b`, then click **Test and use offline**. These models were already installed on this Mac and passed a synthetic compatibility test. No OpenAI key is needed. Settings persist across restarts.
 
-See [DESKTOP_LAUNCH.md](DESKTOP_LAUNCH.md) for desktop shortcuts and icons.
+For a built desktop app:
 
-**Build for your platform:**
-```bash
-npm run build:win   # Windows (NSIS + portable)
-npm run build:mac   # macOS (DMG + ZIP)
-npm run build:linux # Linux (AppImage + DEB)
+```sh
+npm run build:mac:dir
+./launch.sh
 ```
 
-Output goes to the `release/` directory.
+First-time installation/building/model downloads need connectivity. Runtime operation can use the downloaded local models offline. Follow the [offline guide](docs/OFFLINE_GUIDE.md), including Ollama cloud settings and disconnected acceptance. The full desktop workflow has not yet been certified by a disconnected end-to-end test.
 
-## Usage
+## Workflow
 
-1. **API key** — Enter your OpenAI API key when prompted (stored securely with Electron `safeStorage`).
-2. **Import** — Add markdown (`.md`, `.markdown`, `.txt`) via folder, file picker, or drag-and-drop.
-3. **Cluster** — Set number of clusters (or use “Suggest k”), optionally add an AI naming hint, then click “Cluster with AI”.
-4. **Refine** — Drag files between clusters; use “Merge into…” to combine clusters; Ctrl+click files and “Split to new cluster” to split.
-5. **Organize** — Choose output folder, set options (copy/move, inject tags, write index, cluster index, cluster meta, preserve paths), then “Organize Files”.
+Import `.md`, `.markdown` or `.txt` files through selection or drag-and-drop. Choose 2–15 clusters (no more than the file count), optionally suggest k, then cluster. Review, rename, merge or split groups. Choose a fresh output folder and **Copy** first. Optional export features include YAML tags, cluster descriptions, namespaces, relative paths and manifests. Use Preview export to inspect paths and frontmatter changes before confirming. Export history provides undo for unchanged outputs, including restoration of moved originals.
 
-Content used for clustering has YAML frontmatter stripped and can use a title from frontmatter or the first heading, so clustering focuses on body content.
+Embeddings group files; a separate naming model labels groups. Naming failure leaves generic editable labels. Only leading document previews are used, so long-document quality needs manual review. “Similar” is not proof of duplication.
 
-## Project structure
+## Keep your library organized
 
+The **Library** panel lets you save/resume projects, save reviewed category sets, apply those categories to new files, and undo previous exports. Weak or ambiguous category matches go into **Uncertain — review**. Projects warn if original files have changed or disappeared. Unsaved work receives a local recovery copy, model tasks can be cancelled, and unchanged embeddings are reused within a session. Read the [workflow guide](docs/PRODUCT_WORKFLOWS.md) for recovery behavior and local storage limits.
+
+## Providers and privacy
+
+**Offline mode** forces both routes local, skips startup cloud credential validation, rejects remote local-server addresses/redirects/explicit cloud model tags, and never falls back to a cloud provider. The inference server itself must be configured for offline use. `OFFLINE_MODE=true` can enforce local mode before first setup.
+
+**Online mode** supports OpenAI, OpenRouter and Gemini; Pinecone E5 is an optional embedding route when OpenAI is selected. Cloud services receive document previews. OpenAI/custom-endpoint keys can be entered in Model settings; other provider credentials/default models are environment settings listed in [.env.example](.env.example). Do not commit secrets. A custom OpenAI Base URL receives the key supplied with it. Persisted keys use Electron secure storage; if encryption is unavailable, the key remains session-only.
+
+Saved choices override environment provider defaults. Local settings live in Electron userData, so a packaged app needs no `.env` for offline operation. `.env` is loaded from the launch working directory for development/optional cloud configuration.
+
+## Documentation
+
+- [Development handoff and prioritized backlog](HANDOFF.md): start here next session
+
+- [Strategic technical review](docs/TECH-REVIEW.md): verdict, evidence and priorities
+- [Architecture](docs/ARCHITECTURE.md): implemented components, routing, storage and limits
+- [PRD](docs/PRD.md): product requirements, acceptance and backlog
+- [Offline setup](docs/OFFLINE_GUIDE.md): this Mac's model configuration and troubleshooting
+- [Validation](docs/VALIDATION.md): what was tested and what remains unverified
+- [Architecture decision](docs/adr/0001-local-first-desktop.md)
+- [Desktop launchers](DESKTOP_LAUNCH.md)
+
+Earlier `CODE_REVIEW.md` and `CLAUDE.md` describe historical implementation context; current architecture and validation documents take precedence for readiness claims.
+
+## Development checks
+
+```sh
+npm test -- --run
+npm run test:offline
+npm run test:product
+npm run test:resilience
+npm run smoke:local  # requires running Ollama and installed models
+npm run build:mac:dir
 ```
-markdown-clusterer/
-├── electron/
-│   ├── main.js       # Main process: IPC, OpenAI, K-Means, file ops
-│   ├── preload.js    # contextBridge for renderer
-│   └── logger.js     # File logging
-├── src/
-│   ├── App.jsx       # Root state and views
-│   ├── main.jsx
-│   ├── index.css
-│   └── components/   # FileDropZone, FileList, ClusterView, Header, etc.
-├── launch.bat        # Windows launcher (built app or dev)
-├── launch.sh         # macOS/Linux launcher
-├── package.json
-├── vite.config.js
-├── tailwind.config.js
-├── README.md
-└── DESKTOP_LAUNCH.md # Desktop shortcut and icon notes
-```
 
-## Configuration
-
-Provider/API config lives in `.env` (see `.env.example`). Key constants (embedding length, batch size, default models, etc.) are in `electron/main.js` in the `CONFIG` object at the top.
-
-## Cost and efficiency
-
-Defaults are chosen to keep this cheap to run:
-
-- **Embeddings**: `text-embedding-3-small` (the in-app default) is far cheaper than `-large` and plenty accurate for topic clustering — only switch up if cluster quality is consistently poor.
-- **Naming**: whichever `CHAT_PROVIDER` model is set (`gpt-4o-mini`/`openai/gpt-4o-mini`/`gemini-2.5-flash`/a small local model by default) — the naming call only sees a handful of sampled files per cluster, not your whole corpus.
-- **Content truncation**: each file is trimmed to 1500 chars for embedding and 1000 chars for naming (`CONFIG.EMBEDDING_PREVIEW_LENGTH` / `CLUSTER_PREVIEW_LENGTH`) before it's sent anywhere.
-- **Sampling**: cluster naming only looks at up to 5 files per cluster (`CONFIG.MAX_SAMPLE_FILES`), not every file in it.
-- **Batching + rate limiting**: embeddings are sent in batches of 100 (`CONFIG.EMBEDDING_BATCH_SIZE`) with a shared 50 requests/minute limiter and exponential-backoff retries.
-
-## Troubleshooting
-
-- **“API configuration not set”** — Enter and save your OpenAI API key in the app (or set `OPENAI_API_KEY` in `.env`); this key drives embeddings and the default naming provider.
-- **Clusters default to "Cluster N" instead of an AI name** — the naming call failed; check `CHAT_PROVIDER` and the matching key/URL in `.env` (e.g. `OPENROUTER_API_KEY` for `CHAT_PROVIDER=openrouter`, or that Ollama is running at `OLLAMA_BASE_URL` for `CHAT_PROVIDER=local`) — see the log file (Debug menu → Open Log Folder) for the underlying error.
-- **Build fails with “Access is denied”** — Close the app and any Explorer windows on `release\win-unpacked`, delete `release\win-unpacked`, then run `npm run build:win` again. If the project is under OneDrive, pausing sync or building to a different output directory can help.
-- **ESM/require errors in built app** — Ensure you’re on a commit that uses `js-yaml` (not `yaml`) and loads `electron-store` via dynamic `import()` in `main.js`.
-
-## License
-
-MIT.
-
-## Acknowledgments
-
-- [Electron](https://www.electronjs.org/)
-- [OpenAI API](https://openai.com/)
-- [Tailwind CSS](https://tailwindcss.com/)
-- [ml-kmeans](https://www.npmjs.com/package/ml-kmeans)
+Source: `src/` contains React UI; `electron/main.js` handles IPC/model/file workflows; `electron/local-models.js` enforces the local adapter policy; `electron/preload.js` exposes the desktop bridge. Windows/Linux build scripts exist but were not verified during this Mac review.

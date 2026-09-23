@@ -9,6 +9,7 @@ const PROVIDER_LABELS = {
 
 function Header({
   apiKeySet,
+  offlineMode,
   onApiKeyClick,
   fileCount,
   chatProvider,
@@ -91,6 +92,7 @@ function Header({
       </div>
       
       <div className="flex items-center gap-4">
+        {offlineMode && <span className="text-xs text-green-400">Offline mode</span>}
         {fileCount > 0 && (
           <span className="text-gray-400">
             {fileCount} file{fileCount !== 1 ? 's' : ''} loaded
@@ -139,7 +141,7 @@ function Header({
           aria-label={apiKeySet ? 'API connected. Click to manage.' : 'API key not set. Click to configure.'}
         >
           <span className={`w-2 h-2 rounded-full ${apiKeySet ? 'bg-green-400' : 'bg-yellow-400'}`}></span>
-          {apiKeySet ? 'API Connected' : 'Set API Key'}
+          {apiKeySet ? 'Model settings' : 'Configure models'}
         </button>
 
         {/* Debug Menu */}

@@ -11,17 +11,7 @@ const mockFiles = [
 ];
 
 vi.mock('react-virtualized-auto-sizer', () => ({
-  default: ({ children }) => <div data-testid="autosizer">{children({ height: 800, width: 1200 })}</div>
-}));
-
-vi.mock('react-window', () => ({
-  List: ({ children: Row, itemCount }) => {
-    const items = [];
-    for(let i=0; i < itemCount; i++) {
-        items.push(<Row key={i} index={i} style={{}} data={{ files: mockFiles, columnCount: 3 }} />);
-    }
-    return <div data-testid="react-window-list">{items}</div>;
-  }
+  AutoSizer: ({ renderProp }) => <div data-testid="autosizer">{renderProp({ height: 800, width: 1200 })}</div>
 }));
 
 describe('FileList Virtualization', () => {

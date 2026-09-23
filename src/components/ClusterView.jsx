@@ -310,9 +310,9 @@ function ClusterView({
                 ? 'bg-green-600 cursor-default'
                 : 'bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 disabled:cursor-not-allowed'
             }`}
-            aria-label={organized ? 'Files organized' : 'Organize files into folders'}
+            aria-label={organized ? 'Files organized' : 'Preview export'}
           >
-            {organized ? '✓ Organized!' : '📂 Organize Files'}
+            {organized ? '✓ Organized!' : 'Preview export'}
           </button>
         </div>
       </div>

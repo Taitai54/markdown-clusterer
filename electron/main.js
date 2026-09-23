@@ -4,6 +4,34 @@ const fs = require('fs');
 require('dotenv').config();
 const OpenAI = require('openai');
 const YAML = require('js-yaml');
+const { Jobs, check, delay, runClustering } = require('./jobs');
+const { RecoveryStore } = require('./recovery-store');
+let recoveryStore;
+function recovery() {return recoveryStore ||= new RecoveryStore(path.join(app.getPath('userData'),'recovery'));}
+const { EmbeddingCache } = require('./embedding-cache');
+const jobs = new Jobs();
+const embeddingCache = new EmbeddingCache();
+const jobHandler = (name, handler) => ipcMain.handle(name, (event, ...args) => jobs.run(() => handler(event, ...args)));
+ipcMain.handle('cancel-job', () => ({success:true,cancelled:jobs.cancel()}));
+ipcMain.handle('cache-stats', () => ({success:true,...embeddingCache.stats()}));
+ipcMain.handle('clear-embedding-cache', () => {
+  if(jobs.active)return {success:false,error:'Wait for the model task to finish before clearing its cache.'};
+  embeddingCache.clear();return {success:true};
+});
+const { ExportService } = require('./export-service');
+const { LibraryService, assignCategories } = require('./library-service');
+let exportService;
+let libraryService;
+function exportsService() { return exportService ||= new ExportService(path.join(app.getPath('userData'), 'exports')); }
+function library() { return libraryService ||= new LibraryService(path.join(app.getPath('userData'), 'library')); }
+const { validateLocalSettings, createLocalClient, validateEmbeddings } = require('./local-models');
+let localSettings;
+function getLocalSettings() {
+  return localSettings || { baseURL: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434/v1', chatModel: process.env.OLLAMA_CHAT_MODEL || 'llama3.2:latest', embeddingModel: process.env.OLLAMA_EMBEDDING_MODEL || 'nomic-embed-text' };
+}
+function offlineMode() { return store?.get('offlineMode', false) || process.env.OFFLINE_MODE === 'true'; }
+function chatProviderName() { return offlineMode() ? 'local' : (activeChatProvider || process.env.CHAT_PROVIDER || 'openai').toLowerCase(); }
+function embeddingProviderName() { return offlineMode() ? 'local' : (activeEmbeddingProvider || process.env.EMBEDDING_PROVIDER || 'openai').toLowerCase(); }
 
 let store;
 let mainWindow;
@@ -99,13 +127,14 @@ class RateLimiter {
     this.requests = [];
   }
 
-  async throttle() {
+  async throttle(signal) {
+    check(signal);
     const now = Date.now();
     this.requests = this.requests.filter(t => now - t < this.timeWindowMs);
 
     if (this.requests.length >= this.maxRequests) {
       const waitTime = this.timeWindowMs - (now - this.requests[0]);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
+      await delay(waitTime, signal);
     }
 
     this.requests.push(Date.now());
@@ -127,11 +156,7 @@ const CONFIG = {
 
 const apiRateLimiter = new RateLimiter(50, 60000); // 50 requests per minute
 
-// Chat-provider config for the cluster-naming call only. Embeddings stay on the
-// existing OpenAI/Pinecone path above (OpenRouter/Gemini/Ollama embedding support
-// is a documented future option, not wired up here — see README "Choosing a provider").
-// All providers are OpenAI-compatible, so the same `openai` SDK is reused for each
-// by swapping apiKey/baseURL — no extra provider SDKs needed.
+// Naming and embeddings resolve independently; offline mode forces both local.
 const CHAT_PROVIDERS = {
   openai: {
     apiKeyEnv: 'OPENAI_API_KEY',
@@ -163,24 +188,21 @@ const CHAT_PROVIDERS = {
 
 // Build an OpenAI-SDK client pointed at whichever provider CHAT_PROVIDER selects.
 function getChatClient() {
-  const providerName = (activeChatProvider || process.env.CHAT_PROVIDER || 'openai').toLowerCase();
+  const providerName = chatProviderName();
+  if (providerName === 'local') return { client: createLocalClient(getLocalSettings()), model: getLocalSettings().chatModel, providerName };
+  if (providerName === 'openai' && openaiClient) return { client: openaiClient, model: process.env.OPENAI_CHAT_MODEL || CONFIG.CLUSTERING_MODEL, providerName };
   const provider = CHAT_PROVIDERS[providerName] || CHAT_PROVIDERS.openai;
   const apiKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : 'not-required';
   if (provider.apiKeyEnv && !apiKey) {
     throw new Error(`CHAT_PROVIDER=${providerName} requires ${provider.apiKeyEnv} to be set in .env`);
   }
   const model = (provider.modelEnv && process.env[provider.modelEnv]) || provider.defaultModel;
-  const config = { apiKey: apiKey || 'not-required' };
+  const config = { apiKey: apiKey || 'not-required', timeout: 120000, maxRetries: 0 };
   if (provider.baseURL) config.baseURL = provider.baseURL;
   return { client: new OpenAI(config), model, providerName };
 }
 
-// Embedding-provider config. `openai` reuses the already-validated `openaiClient` +
-// the in-app embedding-model dropdown (CONFIG.EMBEDDING_MODEL) exactly as before —
-// this is the default and preserves prior behavior unchanged. gemini/openrouter are
-// alternates so clustering doesn't die if the OpenAI key runs out of credits.
-// (Local/Ollama isn't listed: it has no embedding-capable model pulled by default,
-// and even when one is pulled it's a separate, deliberate opt-in — see README.)
+// OpenAI uses the saved client; other providers have their own credentials.
 const EMBEDDING_PROVIDERS = {
   gemini: {
     apiKeyEnv: 'GEMINI_API_KEY',
@@ -208,9 +230,12 @@ const EMBEDDING_PROVIDERS = {
 // set to a non-OpenAI provider; otherwise falls back to the existing openaiClient
 // + CONFIG.EMBEDDING_MODEL path (default, unchanged behavior).
 function getEmbeddingClient() {
-  const providerName = (activeEmbeddingProvider || process.env.EMBEDDING_PROVIDER || 'openai').toLowerCase();
+  const providerName = embeddingProviderName();
+  if (providerName === 'local') return { client: createLocalClient(getLocalSettings()), model: getLocalSettings().embeddingModel, providerName };
   const provider = EMBEDDING_PROVIDERS[providerName];
   if (!provider) {
+    if (providerName !== 'openai') throw new Error('Unknown embedding provider');
+    if (!openaiClient) throw new Error('Configure an OpenAI key or choose local models in Model settings.');
     return { client: openaiClient, model: CONFIG.EMBEDDING_MODEL, providerName: 'openai' };
   }
   const apiKey = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : 'not-required';
@@ -218,7 +243,7 @@ function getEmbeddingClient() {
     throw new Error(`EMBEDDING_PROVIDER=${providerName} requires ${provider.apiKeyEnv} to be set in .env`);
   }
   const model = (provider.modelEnv && process.env[provider.modelEnv]) || provider.defaultModel;
-  const config = { apiKey: apiKey || 'not-required' };
+  const config = { apiKey: apiKey || 'not-required', timeout: 120000, maxRetries: 0 };
   if (provider.baseURL) config.baseURL = provider.baseURL;
   return { client: new OpenAI(config), model, providerName };
 }
@@ -263,7 +288,14 @@ function createWindow() {
     logger.info('Running in production mode');
   }
 
+  mainWindow.webContents.on('will-prevent-unload', event => {
+    const choice = dialog.showMessageBoxSync(mainWindow, {type:'question',buttons:['Keep editing','Discard changes'],defaultId:0,cancelId:0,message:'This project has unsaved changes.',detail:'Save your project before closing to keep your edits.'});
+    if(choice === 1) event.preventDefault();
+  });
+
+  mainWindow.on('closed', () => jobs.cancel());
   mainWindow.webContents.on('render-process-gone', (event, details) => {
+    jobs.cancel();
     logger.error('Renderer process crashed', details);
   });
 
@@ -275,6 +307,9 @@ function createWindow() {
 app.whenReady().then(async () => {
   const Store = (await import('electron-store')).default;
   store = new Store();
+  localSettings = store.get('localSettings');
+  activeChatProvider = store.get('chatProvider', null);
+  activeEmbeddingProvider = store.get('embeddingProvider', null);
   initLogger();
   createWindow();
 });
@@ -309,67 +344,42 @@ process.on('unhandledRejection', (reason) => {
   }
 });
 
-// Shared embedding generation, used by both cluster-files and suggest-k so they
-// stay in sync on the OpenAI/Pinecone branch (previously suggest-k always used
-// OpenAI and errored when multilingual-e5-large was selected).
+// Session cache contains normalized vectors only; identity prevents cross-provider/model reuse.
 async function generateEmbeddingsForFiles(files, { onBatchDone } = {}) {
-  const embeddings = [];
-
-  for (let i = 0; i < files.length; i += CONFIG.EMBEDDING_BATCH_SIZE) {
-    const batch = files.slice(i, i + CONFIG.EMBEDDING_BATCH_SIZE);
-    const texts = batch.map(f => getContentForEmbedding(f.content, CONFIG.EMBEDDING_PREVIEW_LENGTH));
-
-    let attempt = 0;
-    let batchEmbeddings = null;
-
-    while (attempt < CONFIG.MAX_RETRIES && !batchEmbeddings) {
+  const signal=jobs.signal();check(signal);
+  const providerName=embeddingProviderName();
+  const local=providerName==='local';
+  const pinecone=providerName==='openai' && CONFIG.EMBEDDING_MODEL==='multilingual-e5-large';
+  const emb=pinecone ? null : getEmbeddingClient();
+  const identity={provider:pinecone?'pinecone':providerName,endpoint:pinecone?'https://api.pinecone.io/embed':emb.client.baseURL,
+    model:pinecone?CONFIG.EMBEDDING_MODEL:emb.model,preprocessing:'frontmatter-title-prefix-v1',length:CONFIG.EMBEDDING_PREVIEW_LENGTH,normalization:'l2-v1'};
+  const texts=files.map(f=>getContentForEmbedding(f.content,CONFIG.EMBEDDING_PREVIEW_LENGTH));
+  return embeddingCache.generate(texts,identity,async inputs=>{
+    for(let attempt=0;attempt<CONFIG.MAX_RETRIES;attempt++) {
       try {
-        await apiRateLimiter.throttle();
-
-        if (CONFIG.EMBEDDING_MODEL === 'multilingual-e5-large') {
-          const pk = sessionPineconeKey || process.env.PINECONE_API_KEY;
-          if (!pk) throw new Error('Pinecone API Key required for multilingual-e5-large');
-
-          const response = await fetch('https://api.pinecone.io/embed', {
-            method: 'POST',
-            headers: {
-              'Api-Key': pk,
-              'Content-Type': 'application/json',
-              'X-Pinecone-API-Version': '2024-10'
-            },
-            body: JSON.stringify({
-              model: 'multilingual-e5-large',
-              inputs: texts.map(t => ({ text: t })),
-              parameters: { input_type: 'passage', truncate: 'END' }
-            })
+        check(signal);if(!local)await apiRateLimiter.throttle(signal);
+        if(pinecone) {
+          const pk=sessionPineconeKey || process.env.PINECONE_API_KEY;
+          if(!pk)throw new Error('Pinecone API Key required for multilingual-e5-large');
+          const response=await fetch('https://api.pinecone.io/embed',{
+            method:'POST',signal:signal ? AbortSignal.any([signal,AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
+            headers:{'Api-Key':pk,'Content-Type':'application/json','X-Pinecone-API-Version':'2024-10'},
+            body:JSON.stringify({model:'multilingual-e5-large',inputs:inputs.map(text=>({text})),parameters:{input_type:'passage',truncate:'END'}})
           });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Pinecone Embedding Error: ${response.status} ${errText}`);
-          }
-
-          const resData = await response.json();
-          batchEmbeddings = resData.data.map(d => d.values);
-        } else {
-          const emb = getEmbeddingClient();
-          const response = await emb.client.embeddings.create({
-            model: emb.model,
-            input: texts,
-          });
-          batchEmbeddings = response.data.map(d => d.embedding);
+          if(!response.ok)throw new Error(`Pinecone Embedding Error: ${response.status}`);
+          return (await response.json()).data.map(d=>d.values);
         }
-      } catch (error) {
-        attempt++;
-        if (attempt >= CONFIG.MAX_RETRIES) throw error;
-        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt))); // Exponential backoff
+        const response=await emb.client.embeddings.create({model:emb.model,input:inputs,encoding_format:'float'},{signal});
+        return [...response.data].sort((a,b)=>a.index-b.index).map(d=>d.embedding);
+      } catch(error) {
+        check(signal);if(local || attempt===CONFIG.MAX_RETRIES-1)throw error;
+        await delay(1000*Math.pow(2,attempt+1),signal);
       }
     }
-    embeddings.push(...batchEmbeddings);
-    if (onBatchDone) onBatchDone(i + batch.length);
-  }
-
-  return embeddings;
+  },{signal,batchSize:local?8:CONFIG.EMBEDDING_BATCH_SIZE,onProgress:(done,remaining)=>{
+    onBatchDone?.(done);
+    if(mainWindow && !mainWindow.isDestroyed())mainWindow.webContents.send('clustering-progress',`${done}/${files.length} embeddings ready; ${remaining} remaining (cached results reused).`);
+  }});
 }
 
 // IPC Handlers
@@ -387,9 +397,7 @@ ipcMain.handle('save-api-key', async (event, apiKey, baseURL, pineconeKey) => {
       }
       logger.info('API keys encrypted and saved');
     } else {
-      logger.warn('Encryption not available, storing in plain text');
-      store.set('apiKey', apiKey);
-      if (pineconeKey) store.set('pineconeApiKey', pineconeKey);
+      return { success: false, error: 'Secure credential storage is unavailable. Key is usable for this session only.' };
     }
     
     if (baseURL) {
@@ -407,6 +415,7 @@ ipcMain.handle('save-api-key', async (event, apiKey, baseURL, pineconeKey) => {
 
 // Load API key securely
 ipcMain.handle('load-api-key', async () => {
+  if (offlineMode() || embeddingProviderName() !== 'openai') return { success: true };
   logger.info('Loading stored API key');
   try {
     const stored = store.get('apiKey');
@@ -447,7 +456,8 @@ ipcMain.handle('load-api-key', async () => {
     }
 
     // Test the key
-    const config = { apiKey };
+    if (offlineMode()) throw new Error('Disable offline mode before configuring cloud access.');
+    const config = { apiKey, timeout: 120000, maxRetries: 0 };
     if (baseURL) config.baseURL = baseURL;
     openaiClient = new OpenAI(config);
 
@@ -468,6 +478,8 @@ ipcMain.handle('load-api-key', async () => {
 
 // Delete stored API keys
 ipcMain.handle('delete-api-key', async () => {
+  if(jobs.active)return {success:false,error:'Wait for the current model task or cancel it before changing settings.'};
+  embeddingCache.clear();
   logger.info('Deleting stored API keys');
   try {
     store.delete('apiKey');
@@ -484,11 +496,12 @@ ipcMain.handle('delete-api-key', async () => {
 
 // Check environment API Key
 ipcMain.handle('check-env-api-key', async () => {
+  if (offlineMode() || embeddingProviderName() !== 'openai') return { success: true };
   logger.info('Checking environment for API key');
   const envKey = process.env.OPENAI_API_KEY;
   if (envKey) {
     try {
-      openaiClient = new OpenAI({ apiKey: envKey });
+      openaiClient = new OpenAI({ apiKey: envKey, timeout: 120000, maxRetries: 0 });
       // Test the key
       await openaiClient.models.list();
       logger.info('Environment API key validated successfully');
@@ -504,9 +517,12 @@ ipcMain.handle('check-env-api-key', async () => {
 
 // Set OpenAI API Key
 ipcMain.handle('set-api-key', async (event, apiKey, baseURL, pineconeKey) => {
+  if(jobs.active)return {success:false,error:'Wait for the current model task or cancel it before changing settings.'};
+  embeddingCache.clear();
   logger.info('Setting API keys');
   try {
-    const config = { apiKey };
+    if (offlineMode()) throw new Error('Disable offline mode before configuring cloud access.');
+    const config = { apiKey, timeout: 120000, maxRetries: 0 };
     if (baseURL) {
       config.baseURL = baseURL;
     }
@@ -529,6 +545,9 @@ ipcMain.handle('set-api-key', async (event, apiKey, baseURL, pineconeKey) => {
 
 // New: Set Embedding Model
 ipcMain.handle('set-embedding-model', async (event, modelName) => {
+  if(jobs.active)return {success:false,error:'Wait for the current model task or cancel it before changing settings.'};
+  embeddingCache.clear();
+  if (embeddingProviderName() !== 'openai') return { success: false, error: 'This model selector applies to OpenAI/Pinecone only. Change local models in Model settings.' };
   if (modelName === 'text-embedding-3-small' || modelName === 'multilingual-e5-large' || modelName === 'text-embedding-3-large') {
     CONFIG.EMBEDDING_MODEL = modelName;
     logger.info('Embedding model updated', { model: modelName });
@@ -542,28 +561,66 @@ ipcMain.handle('set-embedding-model', async (event, modelName) => {
 // activeEmbeddingProvider above).
 ipcMain.handle('get-provider-config', async () => {
   return {
-    chatProvider: (activeChatProvider || process.env.CHAT_PROVIDER || 'openai').toLowerCase(),
-    embeddingProvider: (activeEmbeddingProvider || process.env.EMBEDDING_PROVIDER || 'openai').toLowerCase(),
+    chatProvider: chatProviderName(),
+    offlineMode: offlineMode(),
+    localSettings: getLocalSettings(),
+    embeddingProvider: embeddingProviderName(),
     chatOptions: Object.keys(CHAT_PROVIDERS),
     embeddingOptions: ['openai', ...Object.keys(EMBEDDING_PROVIDERS)]
   };
 });
 
 ipcMain.handle('set-chat-provider', async (event, providerName) => {
+  if(jobs.active)return {success:false,error:'Wait for the current model task or cancel it before changing settings.'};
+  embeddingCache.clear();
   if (!CHAT_PROVIDERS[providerName]) {
     return { success: false, error: `Unknown chat provider: ${providerName}` };
   }
+  if (offlineMode() && providerName !== 'local') return { success: false, error: 'Disable offline mode in Model settings first.' };
   activeChatProvider = providerName;
+  store.set('chatProvider', providerName);
   logger.info('Chat provider switched at runtime', { providerName });
   return { success: true };
 });
 
 ipcMain.handle('set-embedding-provider', async (event, providerName) => {
+  if(jobs.active)return {success:false,error:'Wait for the current model task or cancel it before changing settings.'};
+  embeddingCache.clear();
   if (providerName !== 'openai' && !EMBEDDING_PROVIDERS[providerName]) {
     return { success: false, error: `Unknown embedding provider: ${providerName}` };
   }
+  if (offlineMode() && providerName !== 'local') return { success: false, error: 'Disable offline mode in Model settings first.' };
   activeEmbeddingProvider = providerName;
+  store.set('embeddingProvider', providerName);
   logger.info('Embedding provider switched at runtime', { providerName });
+  return { success: true };
+});
+
+// Local settings contain no secrets. Test actual capabilities before saving.
+ipcMain.handle('configure-local', async (event, settings) => {
+  if(jobs.active)return {success:false,error:'Wait for the current model task or cancel it before changing settings.'};
+  embeddingCache.clear();
+  try {
+    const validated = validateLocalSettings(settings);
+    const client = createLocalClient(validated);
+    const response = await client.embeddings.create({ model: validated.embeddingModel, input: ['Local model connection test'], encoding_format: 'float' });
+    validateEmbeddings(response.data.map(d => d.embedding), 1);
+    const chat = await client.chat.completions.create({ model: validated.chatModel, messages: [{ role: 'user', content: 'Reply with {"name":"Ready","description":"Local test"} as JSON.' }], response_format: { type: 'json_object' }, max_tokens: 256 });
+    if (!chat.choices?.[0]?.message?.content) throw new Error('Naming model returned no text.');
+    localSettings = validated;
+    store.set('localSettings', validated);
+    store.set('offlineMode', true);
+    activeChatProvider = activeEmbeddingProvider = 'local';
+    store.set('chatProvider', 'local');
+    store.set('embeddingProvider', 'local');
+    return { success: true };
+  } catch (error) { return { success: false, error: `Local model test failed: ${error.message}` }; }
+});
+ipcMain.handle('disable-offline', async () => {
+  if(jobs.active)return {success:false,error:'Wait for the current model task or cancel it before changing settings.'};
+  embeddingCache.clear();
+  if (process.env.OFFLINE_MODE === 'true') return { success: false, error: 'OFFLINE_MODE is enforced by the environment.' };
+  store.set('offlineMode', false);
   return { success: true };
 });
 
@@ -735,13 +792,10 @@ ipcMain.handle('read-files', async (event, filePaths) => {
 });
 
 // Cluster files using OpenAI
-ipcMain.handle('cluster-files', async (event, files, numClusters, aiHint) => {
-  logger.info('Starting AI clustering', { fileCount: files.length, numClusters, hasAiHint: !!aiHint });
+jobHandler('cluster-files', async (event, files, numClusters, aiHint) => {
+  logger.info('Starting AI clustering', { fileCount: files?.length, numClusters, hasAiHint: !!aiHint });
   
-  if (!openaiClient) {
-    logger.error('Clustering attempted without API key');
-    return { success: false, error: 'API configuration not set' };
-  }
+
 
   // Validate inputs
   if (!Array.isArray(files) || files.length === 0) {
@@ -776,13 +830,7 @@ ipcMain.handle('cluster-files', async (event, files, numClusters, aiHint) => {
 
     event.sender.send('clustering-progress', `Running K-Means clustering...`);
     
-    // Dynamically import ml-kmeans because it's an ES module
-    const mlKmeans = await import('ml-kmeans');
-    const { kmeans } = mlKmeans;
-    
-    // Perform K-Means clustering
-    // The result object has a 'clusters' array where each element is the assigned cluster index (0 to numClusters - 1)
-    const result = kmeans(embeddings, numClusters, { initialization: 'kmeans++' });
+    const result = await runClustering({operation:'cluster',embeddings,k:numClusters},jobs.signal());
     const clusterLabels = result.clusters; // Array of cluster indices
 
     // 3. Group files by cluster
@@ -801,6 +849,7 @@ ipcMain.handle('cluster-files', async (event, files, numClusters, aiHint) => {
 
     const finalClusters = [];
     for (let i = 0; i < numClusters; i++) {
+      check(jobs.signal());
       const fileIndices = clusterGroups[i];
       if (fileIndices.length === 0) continue;
 
@@ -827,15 +876,17 @@ Respond with a JSON object in this exact format:
 
       try {
         if (!chat) throw new Error('Chat provider not configured');
-        await apiRateLimiter.throttle();
+        if (chat.providerName !== 'local') await apiRateLimiter.throttle(jobs.signal());
         const response = await chat.client.chat.completions.create({
           model: chat.model,
           messages: [{ role: 'user', content: prompt }],
           temperature: CONFIG.CLUSTERING_TEMPERATURE,
           response_format: { type: 'json_object' }
-        });
+        }, {signal:jobs.signal()});
+        check(jobs.signal());
         
         const clusterInfo = JSON.parse(response.choices[0].message.content);
+        if (typeof clusterInfo.name !== 'string' || !clusterInfo.name.trim() || typeof clusterInfo.description !== 'string') throw new Error('Invalid cluster naming response');
         
         finalClusters.push({
           name: clusterInfo.name,
@@ -843,6 +894,7 @@ Respond with a JSON object in this exact format:
           fileIndices: fileIndices
         });
       } catch (err) {
+        check(jobs.signal());
         logger.error(`Failed to name cluster ${i}`, err);
         finalClusters.push({
           name: `Cluster ${i + 1}`,
@@ -863,274 +915,40 @@ Respond with a JSON object in this exact format:
   }
 });
 
-// Move files to cluster folders
-ipcMain.handle('organize-files', async (event, outputFolder, clusters, files, options = {}) => {
-  const { 
-    mode = 'copy', 
-    injectTags = false, 
-    injectClusterDescription = false, 
-    writeManifest = false, 
-    writeClusterIndex = false, 
-    preserveRelativePaths = false,
-    namespace = '' // New: Namespace support
-  } = options;
-  
-  const baseOutputFolder = sanitizePath(outputFolder);
-  let sanitizedOutputFolder;
-  try {
-    sanitizedOutputFolder = namespace
-      ? safeJoin(baseOutputFolder, namespace.replace(/[<>:"/\\|?*]/g, '_'))
-      : baseOutputFolder;
-  } catch (pathError) {
-    logger.error('Blocked unsafe namespace path', { namespace, error: pathError.message });
-    return { success: false, error: pathError.message };
-  }
-
-  logger.info('Organizing files', {
-    outputFolder: sanitizedOutputFolder,
-    clusterCount: clusters.length,
-    fileCount: files.length,
-    mode,
-    injectTags,
-    injectClusterDescription,
-    writeManifest,
-    writeClusterIndex,
-    preserveRelativePaths
+// All desktop exports are previewed and committed by a main-process-owned plan.
+const productHandler = (name, handler) => ipcMain.handle(name, async (event, ...args) => {
+  try { return { success: true, ...await handler(...args) }; }
+  catch (error) { return { success: false, error: error.message }; }
+});
+productHandler('save-draft', (session,project) => recovery().save(session,project));
+productHandler('load-draft', () => ({draft:recovery().load()}));
+productHandler('clear-draft', () => {recovery().clear();return {};});
+productHandler('preview-export', (output, clusters, files, options) => ({plan: exportsService().preview(output, clusters, files, options)}));
+productHandler('commit-export', id => exportsService().commit(id));
+productHandler('export-history', () => ({items:exportsService().history()}));
+productHandler('undo-export', id => exportsService().undo(id));
+// Kept as a compatibility alias for scripts; UI uses explicit preview/commit.
+productHandler('organize-files', (output, clusters, files, options) => {
+  const plan=exportsService().preview(output,clusters,files,options);
+  return exportsService().commit(plan.id);
+});
+productHandler('list-library', () => ({projects:library().list('projects'),categories:library().list('categories')}));
+productHandler('save-project', (name,session,id) => library().saveProject(name,session,id));
+productHandler('open-project', id => ({project:library().openProject(id)}));
+productHandler('save-categories', (name,session) => library().saveCategories(name,session));
+jobHandler('apply-categories', async (event, id, files, threshold) => {
+  if (!Array.isArray(files) || !files.length) throw new Error('Import files first');
+  const categories=library().read('categories',id).data;
+  const examples=categories.flatMap(c=>(c.examples.length ? c.examples : ['']).map(text=>({name:c.name,content:[c.name,c.description,text].join('\n\n')})));
+  // Re-embed every example with the active model, then form normalized centroids.
+  const vectors=await generateEmbeddingsForFiles([...files,...examples]);
+  const embeddings=vectors.slice(0,files.length);let offset=files.length;
+  const centroids=categories.map(c=>{
+    const count=Math.max(1,c.examples.length);const rows=vectors.slice(offset,offset+count);offset+=count;
+    return rows[0].map((_,d)=>rows.reduce((sum,row)=>sum+row[d],0)/count);
   });
-
-  try {
-    const results = [];
-    const errors = [];
-    const manifestClusters = [];
-
-    // Helper function for collision-free names
-    const getCollisionFreePath = (filepath) => {
-      if (!fs.existsSync(filepath)) return filepath;
-      const parsed = path.parse(filepath);
-      let counter = 1;
-      let newPath = path.join(parsed.dir, `${parsed.name} (${counter})${parsed.ext}`);
-      while (fs.existsSync(newPath)) {
-        counter++;
-        newPath = path.join(parsed.dir, `${parsed.name} (${counter})${parsed.ext}`);
-      }
-      return newPath;
-    };
-
-    const getCommonRoot = (paths) => {
-      if (paths.length === 0) return '';
-      const normalized = paths.map(p => path.normalize(p));
-      const segments = normalized.map(p => p.split(path.sep).filter(Boolean));
-      let common = segments[0];
-      for (let i = 1; i < segments.length; i++) {
-        let j = 0;
-        while (j < common.length && j < segments[i].length && common[j] === segments[i][j]) j++;
-        common = common.slice(0, j);
-      }
-      return common.length ? common.join(path.sep) + path.sep : '';
-    };
-
-    const commonRoot = preserveRelativePaths && files.length > 0 ? getCommonRoot(files.map(f => f.path)) : '';
-
-    // Helper function to inject metadata into Markdown frontmatter
-    const injectFrontmatter = (content, opts) => {
-      const { tags = [], cluster, clusterDescription } = opts;
-      const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---/;
-      let newContent = content;
-      let existingFm = {};
-
-      const match = content.match(fmRegex);
-      if (match) {
-        try {
-          existingFm = YAML.load(match[1]) || {};
-          newContent = content.substring(match[0].length).trim();
-        } catch (e) {
-          logger.warn('Failed to parse existing frontmatter', e);
-        }
-      }
-
-      if (tags.length > 0) {
-        existingFm.tags = Array.isArray(existingFm.tags) ? existingFm.tags : (existingFm.tags ? [existingFm.tags] : []);
-        for (const tag of tags) {
-          if (!existingFm.tags.includes(tag)) {
-            existingFm.tags.push(tag);
-          }
-        }
-      }
-      
-      if (cluster != null) existingFm.cluster = cluster;
-      if (clusterDescription != null) {
-        existingFm.clusterDescription = clusterDescription;
-        // Search enrichment: Every chunk in Pinecone will now have this context
-        existingFm.topic_context = clusterDescription; 
-      }
-      
-      if (namespace) existingFm.namespace = namespace;
-
-      const newFmString = YAML.dump(existingFm);
-      return `---\n${newFmString}---\n${newContent}`;
-    };
-    
-    for (const cluster of clusters) {
-      // Per-cluster namespace support
-      const currentNamespace = cluster.namespace || namespace;
-      const relativeFilePaths = [];
-      let clusterFolder;
-      let clusterFolderName;
-
-      try {
-        const clusterBaseFolder = currentNamespace
-          ? safeJoin(baseOutputFolder, currentNamespace.replace(/[<>:"/\\|?*]/g, '_'))
-          : baseOutputFolder;
-
-        // Create cluster folder
-        clusterFolderName = cluster.name.replace(/[<>:"/\\|?*]/g, '_');
-        clusterFolder = safeJoin(clusterBaseFolder, clusterFolderName);
-
-        if (!fs.existsSync(clusterFolder)) {
-          fs.mkdirSync(clusterFolder, { recursive: true });
-          logger.debug('Created cluster folder', { folder: clusterFolder });
-        }
-      } catch (mkdirError) {
-        logger.error('Failed to create cluster folder', { cluster: cluster.name, error: mkdirError.message });
-        errors.push({ type: 'mkdir', cluster: cluster.name, error: mkdirError.message });
-        continue;
-      }
-
-      for (const fileIndex of cluster.fileIndices) {
-        const file = files[fileIndex];
-        if (file) {
-          const relPath = preserveRelativePaths && commonRoot ? path.relative(commonRoot, file.path) : file.name;
-          let destDir, destFileName, destPath;
-          try {
-            destDir = safeJoin(clusterFolder, path.dirname(relPath));
-            destFileName = path.basename(relPath);
-            destPath = getCollisionFreePath(safeJoin(preserveRelativePaths && commonRoot ? destDir : clusterFolder, destFileName));
-          } catch (pathError) {
-            logger.error('Blocked unsafe destination path', { source: file.path, error: pathError.message });
-            errors.push({ type: mode, source: file.path, error: pathError.message });
-            continue;
-          }
-          if (preserveRelativePaths && commonRoot && path.dirname(relPath) !== '.') {
-            try {
-              fs.mkdirSync(destDir, { recursive: true });
-            } catch (mkdirErr) {
-              logger.warn('Failed to create subdir', { destDir, error: mkdirErr.message });
-            }
-          }
-          const relativeForManifest = path.join(clusterFolderName, preserveRelativePaths && commonRoot ? relPath : destFileName).replace(/\\/g, '/');
-          relativeFilePaths.push(relativeForManifest);
-          try {
-            if ((injectTags || injectClusterDescription) && /\.(md|markdown)$/i.test(file.name)) {
-              const fileContent = fs.readFileSync(file.path, 'utf8');
-              const newContent = injectFrontmatter(fileContent, {
-                tags: injectTags ? [cluster.name] : [],
-                cluster: injectClusterDescription ? cluster.name : undefined,
-                clusterDescription: injectClusterDescription ? (cluster.description || '') : undefined,
-                namespace: currentNamespace || undefined
-              });
-              fs.writeFileSync(destPath, newContent, 'utf8');
-              if (mode === 'move') {
-                fs.unlinkSync(file.path);
-              }
-            } else {
-              if (mode === 'move') {
-                fs.renameSync(file.path, destPath);
-              } else {
-                fs.copyFileSync(file.path, destPath);
-              }
-            }
-            
-            results.push({
-              source: file.path,
-              destination: destPath,
-              cluster: cluster.name
-            });
-            logger.debug(`File ${mode === 'move' ? 'moved' : 'copied'}`, { source: file.path, destination: destPath });
-          } catch (fileError) {
-            logger.error(`Failed to ${mode} file`, { source: file.path, destination: destPath, error: fileError });
-            errors.push({ type: mode, source: file.path, destination: destPath, error: fileError.message });
-          }
-        }
-      }
-
-      if (writeManifest) {
-        manifestClusters.push({
-          name: cluster.name,
-          description: cluster.description || '',
-          folder: clusterFolderName,
-          filePaths: relativeFilePaths.map(p => p.replace(/\\/g, '/'))
-        });
-      }
-
-      if (writeClusterIndex) {
-        const indexPath = path.join(clusterFolder, '_index.md');
-        const indexContent = `# ${cluster.name}\n\n${cluster.description || 'No description.'}\n`;
-        try {
-          fs.writeFileSync(indexPath, indexContent, 'utf8');
-          logger.debug('Wrote cluster index', { path: indexPath });
-        } catch (indexErr) {
-          logger.warn('Failed to write cluster index', { path: indexPath, error: indexErr.message });
-        }
-      }
-    }
-    
-    if (writeManifest && manifestClusters.length > 0) {
-      const manifestPath = path.join(sanitizedOutputFolder, 'index.json');
-      try {
-        fs.writeFileSync(manifestPath, JSON.stringify({ clusters: manifestClusters }, null, 2), 'utf8');
-        logger.info('Wrote manifest', { path: manifestPath });
-      } catch (writeErr) {
-        logger.error('Failed to write manifest', { path: manifestPath, error: writeErr });
-        errors.push({ type: 'manifest', path: manifestPath, error: writeErr.message });
-      }
-    }
-
-    // Always write/update the dedup manifest so future runs can skip already-organised files
-    try {
-      const dedupPath = path.join(sanitizedOutputFolder, '_dedup_manifest.json');
-      let existingEntries = {};
-      if (fs.existsSync(dedupPath)) {
-        try {
-          existingEntries = JSON.parse(fs.readFileSync(dedupPath, 'utf8')).entries || {};
-        } catch (_) { /* ignore corrupt manifest */ }
-      }
-      // Record each successfully organised file: sourcePath -> mtime ISO string
-      for (const r of results) {
-        const sourcePath = r.source;
-        try {
-          const mtime = fs.existsSync(sourcePath)
-            ? fs.statSync(sourcePath).mtime.toISOString()
-            : new Date().toISOString();
-          existingEntries[sourcePath] = mtime;
-        } catch (_) {
-          existingEntries[sourcePath] = new Date().toISOString();
-        }
-      }
-      fs.writeFileSync(dedupPath, JSON.stringify({ entries: existingEntries }, null, 2), 'utf8');
-      logger.info('Wrote dedup manifest', { path: dedupPath, entryCount: Object.keys(existingEntries).length });
-    } catch (dedupErr) {
-      logger.warn('Failed to write dedup manifest', { error: dedupErr.message });
-    }
-    
-    logger.info('File organization complete', { 
-      filesCopied: results.length, 
-      errors: errors.length 
-    });
-    
-    if (errors.length > 0) {
-      return { 
-        success: true, 
-        results, 
-        warnings: errors,
-        message: `Organized ${results.length} files with ${errors.length} errors`
-      };
-    }
-    
-    return { success: true, results };
-  } catch (error) {
-    logger.error('File organization failed', error);
-    return { success: false, error: error.message };
-  }
+  check(jobs.signal());
+  return {success:true,clusters:assignCategories(embeddings,validateEmbeddings(centroids,categories.length),categories,threshold),embeddings};
 });
 
 // Read dedup manifest from an output folder (returns map of sourcePath -> mtime)
@@ -1162,11 +980,10 @@ ipcMain.handle('suggest-clusters', async (event, fileCount) => {
 });
 
 // Suggest k using elbow method (requires embeddings)
-ipcMain.handle('suggest-k', async (event, files) => {
-  if (!openaiClient) {
-    return { success: false, error: 'API configuration not set', suggestedK: null };
-  }
-  if (!Array.isArray(files) || files.length < 4) {
+jobHandler('suggest-k', async (event, files) => {
+
+  if (!Array.isArray(files) || files.length < 2) return { success: false, error: 'At least two files are required', suggestedK: null };
+  if (files.length < 4) {
     const fallback = files.length <= 5 ? 2 : files.length <= 15 ? 3 : Math.min(10, Math.ceil((files.length || 1) / 8));
     return { success: true, suggestedK: fallback };
   }
@@ -1183,39 +1000,7 @@ ipcMain.handle('suggest-k', async (event, files) => {
     // (previously always used OpenAI and errored on multilingual-e5-large).
     const embeddings = await generateEmbeddingsForFiles(files);
 
-    const mlKmeans = await import('ml-kmeans');
-    const { kmeans } = mlKmeans;
-
-    const K_MAX = Math.min(10, Math.max(2, Math.floor(files.length / 2)));
-    const wss = [];
-    for (let k = 2; k <= K_MAX; k++) {
-      const result = kmeans(embeddings, k, { initialization: 'kmeans++' });
-      const centroids = result.centroids;
-      const labels = result.clusters;
-      let sumSq = 0;
-      for (let i = 0; i < embeddings.length; i++) {
-        const c = centroids[labels[i]];
-        for (let d = 0; d < embeddings[i].length; d++) {
-          const diff = embeddings[i][d] - c[d];
-          sumSq += diff * diff;
-        }
-      }
-      wss.push(sumSq);
-    }
-
-    let suggestedK = 2;
-    if (wss.length >= 3) {
-      let maxCurv = -Infinity;
-      for (let i = 1; i < wss.length - 1; i++) {
-        const curv = (wss[i - 1] - wss[i]) - (wss[i] - wss[i + 1]);
-        if (curv > maxCurv) {
-          maxCurv = curv;
-          suggestedK = i + 2;
-        }
-      }
-    } else {
-      suggestedK = wss.length === 2 ? 2 : K_MAX;
-    }
+    const {suggestedK}=await runClustering({operation:'suggest',embeddings},jobs.signal());
 
     reportProgress('');
     return { success: true, suggestedK: Math.min(15, Math.max(2, suggestedK)) };

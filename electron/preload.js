@@ -1,6 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+  configureLocal: (settings) => ipcRenderer.invoke('configure-local', settings),
+  disableOffline: () => ipcRenderer.invoke('disable-offline'),
   // API Key management
   setApiKey: (apiKey, baseURL, pineconeKey) => ipcRenderer.invoke('set-api-key', apiKey, baseURL, pineconeKey),
   checkEnvApiKey: () => ipcRenderer.invoke('check-env-api-key'),
@@ -28,6 +31,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onProgress: (callback) => ipcRenderer.on('clustering-progress', callback),
   removeProgressListener: () => ipcRenderer.removeAllListeners('clustering-progress'),
   
+  cancelJob: () => ipcRenderer.invoke('cancel-job'),
+  cacheStats: () => ipcRenderer.invoke('cache-stats'),
+  clearEmbeddingCache: () => ipcRenderer.invoke('clear-embedding-cache'),
+  saveDraft: (session, project) => ipcRenderer.invoke('save-draft', session, project),
+  loadDraft: () => ipcRenderer.invoke('load-draft'),
+  clearDraft: () => ipcRenderer.invoke('clear-draft'),
+  listLibrary: () => ipcRenderer.invoke('list-library'),
+  saveProject: (name, session, id) => ipcRenderer.invoke('save-project', name, session, id),
+  openProject: (id) => ipcRenderer.invoke('open-project', id),
+  saveCategories: (name, session) => ipcRenderer.invoke('save-categories', name, session),
+  applyCategories: (id, files, threshold) => ipcRenderer.invoke('apply-categories', id, files, threshold),
+  previewExport: (...args) => ipcRenderer.invoke('preview-export', ...args),
+  commitExport: (id) => ipcRenderer.invoke('commit-export', id),
+  exportHistory: () => ipcRenderer.invoke('export-history'),
+  undoExport: (id) => ipcRenderer.invoke('undo-export', id),
   // Organization
   organizeFiles: (outputFolder, clusters, files, options) => 
     ipcRenderer.invoke('organize-files', outputFolder, clusters, files, options),

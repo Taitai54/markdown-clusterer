@@ -18,7 +18,7 @@ function FileDropZone({ onSelectFolder, onSelectFiles, onDropPaths }) {
     setIsDragging(false);
     
     if (e.dataTransfer && e.dataTransfer.files) {
-      const paths = Array.from(e.dataTransfer.files).map(f => f.path).filter(Boolean);
+      const paths = Array.from(e.dataTransfer.files).map(f => window.electronAPI.getPathForFile(f)).filter(Boolean);
       if (paths.length > 0 && typeof onDropPaths === 'function') {
         onDropPaths(paths);
         return;

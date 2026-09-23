@@ -1,4 +1,4 @@
-import React, { useState, useCallback, memo, useRef } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import { List } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 
@@ -91,15 +91,10 @@ const FileCard = memo(function FileCard({ file, index, onRemove, isExpanded, onT
 
 function FileList({ files, onRemove }) {
   const [expandedFile, setExpandedFile] = useState(null);
-  const listRef = useRef();
 
   const handleToggle = useCallback((index) => {
     setExpandedFile(prev => {
       const next = prev === index ? null : index;
-      if (listRef.current) {
-        // We use setTimeout to allow state to settle before resetting heights
-        setTimeout(() => listRef.current.resetAfterIndex(0), 0);
-      }
       return next;
     });
   }, []);
@@ -110,8 +105,7 @@ function FileList({ files, onRemove }) {
     return 1;
   };
 
-  const Row = ({ index, style, data }) => {
-    const { files, columnCount } = data;
+  const Row = ({ index, style, files, columnCount }) => {
     const startIndex = index * columnCount;
     const items = [];
     
@@ -151,28 +145,23 @@ function FileList({ files, onRemove }) {
 
   return (
     <div className="flex-1 overflow-hidden" role="list" aria-label="Loaded files">
-      <AutoSizer>
-        {({ height, width }) => {
-          if (width === 0 || height === 0) return null;
+      <AutoSizer renderProp={({ height, width }) => {
+          if (!width || !height) return null;
           
           const columnCount = getColumnCount(width);
           const rowCount = Math.ceil(files.length / columnCount);
           
           return (
             <List
-              ref={listRef}
-              height={height}
-              itemCount={rowCount}
-              itemSize={(i) => getItemSize(i, columnCount)}
-              itemData={{ files, columnCount }}
-              width={width}
+              style={{ height, width }}
+              rowCount={rowCount}
+              rowHeight={(i) => getItemSize(i, columnCount)}
+              rowProps={{ files, columnCount }}
+              rowComponent={Row}
               overscanCount={2}
-            >
-              {Row}
-            </List>
+            />
           );
-        }}
-      </AutoSizer>
+        }} />
     </div>
   );
 }
