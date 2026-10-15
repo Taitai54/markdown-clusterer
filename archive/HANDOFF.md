@@ -118,7 +118,7 @@ For ACCEPT-01, the missing input is the owner's chosen sample folder and expecte
 4. [Offline guide](docs/OFFLINE_GUIDE.md) for setup.
 5. [Strategic review](docs/TECH-REVIEW.md) and `docs/reviews/` for original rationale.
 
-The strategic review, reviewer memos, and earlier validation sections are historical. Some describe features as absent that subsequent iterations delivered. Latest code, current workflow docs and this handoff take precedence. `CODE_REVIEW.md` and `CLAUDE.md` also include older implementation context.
+The strategic review, reviewer memos, and earlier validation sections are historical. Some describe features as absent that subsequent iterations delivered. Latest code and the docs in `docs/` take precedence. `archive/CODE_REVIEW.md` and `CLAUDE.md` also include older implementation context.
 
 ## Next-session starting prompt
 

@@ -2,7 +2,7 @@
 
 **Confidence:** Medium
 **Basis:** Direct review of the implementation and operating documentation establishes cost drivers and avoidable work; no measured personal workload or benefit baseline was supplied.
-**Materials reviewed:** `README.md` (providers, usage, cost and efficiency); `package.json` (scripts and packaging); `DESKTOP_LAUNCH.md`; `CODE_REVIEW.md`; `launch.sh`; `electron/main.js` (provider clients, embedding generation, clustering, naming, export and suggested k); `src/App.jsx` (startup and workflow); `src/components/ApiKeyModal.jsx`.
+**Materials reviewed:** `README.md` (providers, usage, cost and efficiency); `package.json` (scripts and packaging); `DESKTOP_LAUNCH.md`; `archive/CODE_REVIEW.md`; `launch.sh`; `electron/main.js` (provider clients, embedding generation, clustering, naming, export and suggested k); `src/App.jsx` (startup and workflow); `src/components/ApiKeyModal.jsx`.
 **Materials unavailable or unreadable:** No cost spreadsheet, model benchmark, representative workload measurement or benefit log was supplied. Secrets were intentionally not read.
 **Proportionality applied:** A reversible, personal desktop utility on an existing Mac; no enterprise funding process, five-year procurement exercise or cash-saving claim is required. This is the 19 September 2026 pre-remediation baseline: fixes made during the wider review must be assessed separately against their tests.
 
@@ -24,7 +24,7 @@ The user requests a strategic review and fitness for local models and offline us
 
 **F-COM-02 · OPPORTUNITY · MAJOR**
 - **Claim:** Reuse embeddings between Suggest k and clustering, with invalidation when input content, preprocessing, endpoint or model changes.
-- **Evidence:** `CODE_REVIEW.md`, Still open: “`suggest-k` and `cluster-files` each re-embed the full file set”; `electron/main.js`, both handlers call `generateEmbeddingsForFiles(files)`.
+- **Evidence:** `archive/CODE_REVIEW.md`, Still open: “`suggest-k` and `cluster-files` each re-embed the full file set”; `electron/main.js`, both handlers call `generateEmbeddingsForFiles(files)`.
 - **So what:** This removes one complete embedding pass from that two-step workflow: 50% of its embedding requests and input volume before retries. It does not halve total runtime because k-means, naming and export remain. A bounded in-memory cache has a small implementation and test cost and avoids a database or storage migration.
 - **Ask:** Does an unchanged Suggest k → Cluster run reuse vectors, and do model/content changes demonstrably invalidate them?
 - **First step:** Cache one recent embedding result and test request counts and invalidation on a small fixture corpus.

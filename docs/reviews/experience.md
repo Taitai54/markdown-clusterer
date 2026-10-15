@@ -2,7 +2,7 @@
 
 **Confidence:** Medium
 **Basis:** Direct inspection of the implemented import, provider selection, clustering and export journeys; no observed end-to-end desktop session or representative corpus benchmark.
-**Materials reviewed:** `README.md`, `CODE_REVIEW.md`, `package.json`, `electron/main.js`, `src/App.jsx`, `src/components/{ApiKeyModal,Header,FileDropZone,ClusterView,ProgressModal}.jsx` and the review standards, output contract and omnichannel reference.
+**Materials reviewed:** `README.md`, `archive/CODE_REVIEW.md`, `package.json`, `electron/main.js`, `src/App.jsx`, `src/components/{ApiKeyModal,Header,FileDropZone,ClusterView,ProgressModal}.jsx` and the review standards, output contract and omnichannel reference.
 **Materials unavailable or unreadable:** None of the requested source material; `.env` deliberately not read. Machine measurements and user research were not supplied to this reviewer.
 **Proportionality applied:** One person's reversible desktop workflow. Retail personalization, consented identity graphs, assisted channels and revenue holdouts are outside scope; equivalent data-boundary, recovery and user-control tests remain applicable.
 
@@ -50,7 +50,7 @@ The request is to make the existing tool fit for use "on my computer" and "use t
 
 **F-CX-06 · OPPORTUNITY · MAJOR**
 - **Claim:** Reuse embeddings between Suggest k and clustering to shorten the most natural exploratory workflow.
-- **Evidence:** `electron/main.js:1184` calls `generateEmbeddingsForFiles(files)` for Suggest k, and the cluster handler calls the same generator again; `CODE_REVIEW.md` explicitly tracks "each re-embed the full file set".
+- **Evidence:** `electron/main.js:1184` calls `generateEmbeddingsForFiles(files)` for Suggest k, and the cluster handler calls the same generator again; `archive/CODE_REVIEW.md` explicitly tracks "each re-embed the full file set".
 - **So what:** A session cache can eliminate the second full embedding pass on unchanged input; the investment is bounded application work with no additional service or subscription. Time saving remains unmeasured.
 - **Ask:** Can reuse be keyed by exact processed content, provider, endpoint, model and preprocessing version so switching models cannot reuse the wrong vectors?
 - **First step:** Add a bounded in-memory cache and demonstrate one embedding pass for Suggest k followed by Cluster on an unchanged fixture.

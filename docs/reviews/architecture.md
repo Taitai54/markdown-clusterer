@@ -2,7 +2,7 @@
 
 **Confidence:** High for source defects; Medium for operational fitness.
 **Basis:** Direct tracing of the import → embedding → clustering → naming → export journey; no live model benchmark or packaged-app execution performed by this reviewer.
-**Materials reviewed:** `electron/main.js`, `electron/preload.js`, `electron/logger.js`, `src/App.jsx`, duplicate detection in `src/components/ClusterView.jsx`, `package.json`, `vite.config.js`, `index.html`, `launch.sh`, `markdowncluster.command`, `README.md`, `CODE_REVIEW.md`, `CLAUDE.md`, `verify_logic.js`, repository file inventory.
+**Materials reviewed:** `electron/main.js`, `electron/preload.js`, `electron/logger.js`, `src/App.jsx`, duplicate detection in `src/components/ClusterView.jsx`, `package.json`, `vite.config.js`, `index.html`, `launch.sh`, `markdowncluster.command`, `README.md`, `archive/CODE_REVIEW.md`, `CLAUDE.md`, `archive/verify_logic.js`, repository file inventory.
 **Materials unavailable or unreadable:** No supplied representative corpus, measured performance budget, recovery test or model-quality evaluation. Secrets in `.env` deliberately not read.
 **Proportionality applied:** One person's desktop productivity tool; no enterprise availability, identity platform, distributed service or regulated-system requirements imposed.
 
@@ -44,7 +44,7 @@ Make this existing application dependable on the owner's Mac, including operatio
 
 **F-ARC-05 · GAP · MAJOR**
 - **Claim:** Model choice and clustering quality lack a reproducible evaluation tied to organizing the owner's documents.
-- **Evidence:** `electron/main.js:117` selects 1,500-character embedding previews; `:785` uses unseeded `kmeans++`; `:810` names from the first five members; `src/components/ClusterView.jsx:70` labels cosine similarity above `0.92` as overlap. `verify_logic.js` explicitly tests copied helper logic, while the baseline test inventory contains only two renderer component suites.
+- **Evidence:** `electron/main.js:117` selects 1,500-character embedding previews; `:785` uses unseeded `kmeans++`; `:810` names from the first five members; `src/components/ClusterView.jsx:70` labels cosine similarity above `0.92` as overlap. `archive/verify_logic.js` explicitly tests copied helper logic, while the baseline test inventory contains only two renderer component suites.
 - **So what:** A local model returning valid vectors does not establish useful grouping, and a similarity threshold is not evidence of duplicate documents. Long notes may be grouped by boilerplate at their start. Human refinement is valuable and should remain.
 - **Ask:** Does a representative labelled corpus show useful grouping versus a title/tag baseline, with stable results and no automatic deletion based on similarity?
 

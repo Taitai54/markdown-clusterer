@@ -40,17 +40,16 @@ Saved choices override environment provider defaults. Local settings live in Ele
 
 ## Documentation
 
-- [Development handoff and prioritized backlog](HANDOFF.md): start here next session
-
+- [Architecture](docs/ARCHITECTURE.md): implemented components, routing, storage and limits. Start here.
 - [Strategic technical review](docs/TECH-REVIEW.md): verdict, evidence and priorities
-- [Architecture](docs/ARCHITECTURE.md): implemented components, routing, storage and limits
 - [PRD](docs/PRD.md): product requirements, acceptance and backlog
 - [Offline setup](docs/OFFLINE_GUIDE.md): this Mac's model configuration and troubleshooting
 - [Validation](docs/VALIDATION.md): what was tested and what remains unverified
 - [Architecture decision](docs/adr/0001-local-first-desktop.md)
 - [Desktop launchers](DESKTOP_LAUNCH.md)
+- [Archived September handoff](archive/HANDOFF.md): historical session notes, not the current app
 
-Earlier `CODE_REVIEW.md` and `CLAUDE.md` describe historical implementation context; current architecture and validation documents take precedence for readiness claims.
+Earlier `archive/CODE_REVIEW.md` and `CLAUDE.md` describe historical implementation context; current architecture and validation documents take precedence for readiness claims.
 
 ## Development checks
 
