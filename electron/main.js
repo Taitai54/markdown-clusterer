@@ -4,6 +4,7 @@ const fs = require('fs');
 require('dotenv').config();
 const OpenAI = require('openai');
 const YAML = require('js-yaml');
+const { buildMergedMarkdown } = require('./mergeMarkdown');
 const { Jobs, check, delay, runClustering } = require('./jobs');
 const { RecoveryStore } = require('./recovery-store');
 let recoveryStore;
@@ -787,6 +788,44 @@ ipcMain.handle('read-files', async (event, filePaths) => {
     return { success: true, files };
   } catch (error) {
     logger.error('Error reading files', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('save-markdown-dialog', async (event, defaultName) => {
+  try {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save merged markdown',
+      defaultPath: defaultName || 'merged.md',
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    return /\.md$/i.test(result.filePath) ? result.filePath : `${result.filePath}.md`;
+  } catch (error) {
+    logger.error('Save dialog failed', error);
+    return null;
+  }
+});
+
+// Write selected markdown files into one new document. Sources are not moved or deleted.
+ipcMain.handle('merge-markdown', async (event, files, outputPath, title) => {
+  logger.info('Merging markdown files', { count: Array.isArray(files) ? files.length : 0, outputPath });
+  try {
+    if (!outputPath || typeof outputPath !== 'string') {
+      return { success: false, error: 'Choose a file to save the merged document' };
+    }
+    const dest = sanitizePath(outputPath);
+    if (fs.existsSync(dest) && fs.statSync(dest).isDirectory()) {
+      return { success: false, error: 'Choose a markdown file, not a folder' };
+    }
+    const docTitle = title || path.basename(dest, path.extname(dest));
+    const content = buildMergedMarkdown(files, docTitle);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, content, 'utf8');
+    logger.info('Merged markdown written', { path: dest, fileCount: files.length });
+    return { success: true, path: dest };
+  } catch (error) {
+    logger.error('Markdown merge failed', error);
     return { success: false, error: error.message };
   }
 });

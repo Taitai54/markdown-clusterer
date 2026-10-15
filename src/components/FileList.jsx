@@ -1,8 +1,8 @@
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, memo, useEffect } from 'react';
 import { List } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 
-const FileCard = memo(function FileCard({ file, index, onRemove, isExpanded, onToggle }) {
+const FileCard = memo(function FileCard({ file, index, onRemove, isExpanded, onToggle, isSelected, onToggleSelect }) {
   const formatFileSize = (bytes) => {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -30,11 +30,19 @@ const FileCard = memo(function FileCard({ file, index, onRemove, isExpanded, onT
 
   return (
     <div
-      className="file-card h-full bg-dark-100 rounded-xl p-4 border border-gray-700 hover:border-gray-600 cursor-pointer flex flex-col"
-      onClick={() => onToggle(index)}
+      className={`file-card h-full bg-dark-100 rounded-xl p-4 border cursor-pointer flex flex-col ${isSelected ? 'border-amber-400' : 'border-gray-700 hover:border-gray-600'}`}
+      onClick={(e) => {
+        if ((e.ctrlKey || e.metaKey) && onToggleSelect) {
+          e.preventDefault();
+          onToggleSelect(index);
+          return;
+        }
+        onToggle(index);
+      }}
       role="button"
       tabIndex={0}
-      aria-label={`File: ${file.name}, ${formatFileSize(file.size)}. Click to ${isExpanded ? 'collapse' : 'expand'} preview.`}
+      aria-label={`File: ${file.name}, ${formatFileSize(file.size)}. Click to ${isExpanded ? 'collapse' : 'expand'} preview. Ctrl+click to select for merge.`}
+      aria-pressed={isSelected || undefined}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(index); } }}
     >
       <div className="flex items-start justify-between mb-3">
@@ -89,8 +97,13 @@ const FileCard = memo(function FileCard({ file, index, onRemove, isExpanded, onT
   );
 });
 
-function FileList({ files, onRemove }) {
+function FileList({ files, onRemove, onMergeDocuments }) {
   const [expandedFile, setExpandedFile] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState([]);
+
+  useEffect(() => {
+    setSelectedOrder([]);
+  }, [files]);
 
   const handleToggle = useCallback((index) => {
     setExpandedFile(prev => {
@@ -99,16 +112,20 @@ function FileList({ files, onRemove }) {
     });
   }, []);
 
+  const toggleSelected = useCallback((index) => {
+    setSelectedOrder(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]);
+  }, []);
+
   const getColumnCount = (width) => {
     if (width >= 1024) return 3;
     if (width >= 768) return 2;
     return 1;
   };
 
-  const Row = ({ index, style, files, columnCount }) => {
+  const Row = ({ index, style, files, columnCount, selectedOrder, onToggleSelect }) => {
     const startIndex = index * columnCount;
     const items = [];
-    
+
     for (let i = 0; i < columnCount; i++) {
       const itemIndex = startIndex + i;
       if (itemIndex < files.length) {
@@ -120,6 +137,8 @@ function FileList({ files, onRemove }) {
               onRemove={onRemove}
               isExpanded={expandedFile === itemIndex}
               onToggle={handleToggle}
+              isSelected={selectedOrder.includes(itemIndex)}
+              onToggleSelect={onToggleSelect}
             />
           </div>
         );
@@ -144,24 +163,50 @@ function FileList({ files, onRemove }) {
   };
 
   return (
-    <div className="flex-1 overflow-hidden" role="list" aria-label="Loaded files">
+    <div className="flex-1 overflow-hidden flex flex-col" role="list" aria-label="Loaded files">
+      {selectedOrder.length > 0 && (
+        <div className="flex items-center gap-2 mb-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={async () => {
+              if (selectedOrder.length < 2 || !onMergeDocuments) return;
+              const ok = await onMergeDocuments(selectedOrder);
+              if (ok) setSelectedOrder([]);
+            }}
+            disabled={selectedOrder.length < 2}
+            className="text-sm px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg"
+          >
+            Merge {selectedOrder.length} into one document
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedOrder([])}
+            className="text-sm px-3 py-1.5 bg-dark-100 hover:bg-dark-300 border border-gray-600 rounded-lg"
+          >
+            Clear selection
+          </button>
+          <span className="text-xs text-gray-500">Ctrl+click files to choose what gets merged, in the order you select them.</span>
+        </div>
+      )}
+      <div className="flex-1 overflow-hidden">
       <AutoSizer renderProp={({ height, width }) => {
           if (!width || !height) return null;
-          
+
           const columnCount = getColumnCount(width);
           const rowCount = Math.ceil(files.length / columnCount);
-          
+
           return (
             <List
               style={{ height, width }}
               rowCount={rowCount}
               rowHeight={(i) => getItemSize(i, columnCount)}
-              rowProps={{ files, columnCount }}
+              rowProps={{ files, columnCount, selectedOrder, onToggleSelect: toggleSelected }}
               rowComponent={Row}
               overscanCount={2}
             />
           );
         }} />
+      </div>
     </div>
   );
 }

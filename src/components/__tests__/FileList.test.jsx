@@ -48,4 +48,17 @@ describe('FileList Virtualization', () => {
     const preTags = document.querySelectorAll('pre');
     expect(preTags.length).toBeGreaterThan(0);
   });
+
+  it('selects files with ctrl+click and offers document merge in that order', () => {
+    const handleRemove = vi.fn();
+    const handleMerge = vi.fn().mockResolvedValue(false);
+    render(<FileList files={mockFiles} onRemove={handleRemove} onMergeDocuments={handleMerge} />);
+
+    fireEvent.click(screen.getByText('file2.md').closest('.file-card'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('file1.md').closest('.file-card'), { ctrlKey: true });
+
+    const mergeButton = screen.getByRole('button', { name: /Merge 2 into one document/i });
+    fireEvent.click(mergeButton);
+    expect(handleMerge).toHaveBeenCalledWith([1, 0]);
+  });
 });

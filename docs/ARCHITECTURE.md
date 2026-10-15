@@ -27,7 +27,8 @@ The app is Electron + Vite/React, not Next.js. There is no hosted application ba
 | `src/App.jsx` | Session state, import, clustering, manual review and export controls |
 | `src/components/FileList.jsx` | Virtualized file previews using installed v2 list APIs |
 | `electron/preload.js` | Explicit renderer API and modern Electron dropped-file path access |
-| `electron/main.js` | Provider selection, IPC, credential persistence, import, embeddings, K-means, naming, export |
+| `electron/main.js` | Provider selection, IPC, credential persistence, import, embeddings, K-means, naming, export, document merge |
+| `electron/mergeMarkdown.js` | Concatenate selected markdown files into one document. No model call. |
 | `electron/local-models.js` | Loopback URL policy, bounded local requests and vector validation |
 | `electron/export-service.js` | Exact export plans, staged payloads/backups, durable journals and guarded undo |
 | `electron/library-service.js` | Versioned project snapshots, category examples and threshold-based assignment |
@@ -70,3 +71,15 @@ The runtime was upgraded from Electron 28 because the declared electron-store 11
 ## Product workflow extension
 
 See [Projects, categories and reversible export](PRODUCT_WORKFLOWS.md). The renderer previews export through IPC, receives a plan ID, and confirms that ID; the main process owns exact paths and staged content. Library snapshots deliberately omit credentials and vectors. Applying reusable categories re-embeds examples with the active model, constructs normalized centroids, and places weak/ambiguous matches in Uncertain. These services are independent of Electron and covered by filesystem regression tests.
+
+## Document merge
+
+**Merge into** groups files into one cluster. **Merge into one document** writes one new markdown file. Sources are left where they are.
+
+Ctrl+click (or Cmd+click) selects files. On the file list, that selection is only for this merge. In Cluster View, the same selection also feeds Split. Section order is the order the files were selected. If the selection spans more than one cluster, the tip bar offers to merge every selected file.
+
+`save-markdown-dialog` asks for the output path. `merge-markdown` calls `buildMergedMarkdown()` and writes that file. The document title is the filename without `.md`. The handler checks the path with `sanitizePath()` and refuses to write if the chosen path is an existing directory. The save dialog is the user's chosen destination, so the file is not forced under the organize output folder.
+
+Each source becomes a `##` section. The section title comes from frontmatter `title`, otherwise the first heading, otherwise the filename. Source frontmatter is dropped. The combined file has one frontmatter block with `title` and `sources` (original paths), then an `#` heading of the document title. Headings inside a source stay as written.
+
+No embedding or chat call is involved, so this works with no API key and in offline mode. A merged file can be large: the 1,500-character embedding trim does not apply.

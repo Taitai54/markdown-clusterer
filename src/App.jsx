@@ -555,6 +555,36 @@ function App() {
     dispatch({ type: 'SPLIT_CLUSTER', payload: { clusterIndex, fileIndices } });
   };
 
+  const handleMergeDocuments = async (fileIndices) => {
+    const selected = [];
+    const seen = new Set();
+    for (const index of fileIndices) {
+      if (seen.has(index)) continue;
+      seen.add(index);
+      const file = files[index];
+      if (file) selected.push({ name: file.name, path: file.path, content: file.content });
+    }
+    if (selected.length < 2) {
+      dispatch({ type: 'SET_ERROR', payload: 'Select at least two files to merge' });
+      return false;
+    }
+    setNotice('');
+    try {
+      const savePath = await window.electronAPI.saveMarkdownDialog('merged.md');
+      if (!savePath) return false;
+      const result = await window.electronAPI.mergeMarkdown(selected, savePath);
+      if (result.success) {
+        setNotice(`Merged ${selected.length} files into ${result.path}`);
+        return true;
+      }
+      dispatch({ type: 'SET_ERROR', payload: result.error || 'Merge failed' });
+      return false;
+    } catch (err) {
+      dispatch({ type: 'SET_ERROR', payload: 'Merge failed: ' + err.message });
+      return false;
+    }
+  };
+
   return (
     <div
       className="h-screen flex flex-col bg-dark-200 relative"
@@ -698,6 +728,7 @@ function App() {
             <FileList
               files={files}
               onRemove={handleRemoveFile}
+              onMergeDocuments={handleMergeDocuments}
             />
           </div>
         ) : (
@@ -734,6 +765,7 @@ function App() {
             onRenameCluster={handleRenameCluster}
             onSetClusterNamespace={(index, ns) => dispatch({ type: 'SET_CLUSTER_NAMESPACE', payload: { index, namespace: ns } })}
             onMergeClusters={handleMergeClusters}
+            onMergeDocuments={handleMergeDocuments}
             onSplitCluster={handleSplitCluster}
             onRecluster={() => dispatch({ type: 'SET_CLUSTERS', payload: { clusters: [], embeddings: [] } })}
           />

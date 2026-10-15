@@ -22,7 +22,7 @@ First-time installation/building/model downloads need connectivity. Runtime oper
 
 ## Workflow
 
-Import `.md`, `.markdown` or `.txt` files through selection or drag-and-drop. Choose 2–15 clusters (no more than the file count), optionally suggest k, then cluster. Review, rename, merge or split groups. Choose a fresh output folder and **Copy** first. Optional export features include YAML tags, cluster descriptions, namespaces, relative paths and manifests. Use Preview export to inspect paths and frontmatter changes before confirming. Export history provides undo for unchanged outputs, including restoration of moved originals.
+Import `.md`, `.markdown` or `.txt` files through selection or drag-and-drop. Choose 2–15 clusters (no more than the file count), optionally suggest k, then cluster. Review, rename, merge or split groups. Ctrl+click two or more files and choose **Merge into one document** to save them as one new markdown file; the originals stay in place, and this is separate from merging two clusters into one group. Choose a fresh output folder and **Copy** first. Optional export features include YAML tags, cluster descriptions, namespaces, relative paths and manifests. Use Preview export to inspect paths and frontmatter changes before confirming. Export history provides undo for unchanged outputs, including restoration of moved originals.
 
 Embeddings group files; a separate naming model labels groups. Naming failure leaves generic editable labels. Only leading document previews are used, so long-document quality needs manual review. “Similar” is not proof of duplication.
 

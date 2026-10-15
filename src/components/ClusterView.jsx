@@ -24,6 +24,7 @@ function ClusterView({
   onRenameCluster,
   onSetClusterNamespace,
   onMergeClusters,
+  onMergeDocuments,
   onSplitCluster,
   onRecluster,
   namespace,
@@ -144,7 +145,20 @@ function ClusterView({
   };
 
   const getSelectedInCluster = (cluster) => cluster.fileIndices.filter(i => selectedForSplit.has(i));
+  const getSelectedInClusterInOrder = (cluster) => {
+    const inCluster = new Set(cluster.fileIndices);
+    return [...selectedForSplit].filter(i => inCluster.has(i));
+  };
   const clearSplitSelection = () => setSelectedForSplit(new Set());
+  const selectionSpansClusters = () => {
+    let owner = null;
+    for (const fileIndex of selectedForSplit) {
+      const clusterIndex = clusters.findIndex(cluster => cluster.fileIndices.includes(fileIndex));
+      if (owner === null) owner = clusterIndex;
+      else if (clusterIndex !== owner) return true;
+    }
+    return false;
+  };
 
   const clusterColors = useMemo(() => [
     'from-blue-500/20 to-blue-700/20 border-blue-500/30',
@@ -319,7 +333,19 @@ function ClusterView({
 
       {/* Instructions */}
       <div className="mb-4 p-3 bg-dark-100 rounded-lg text-sm text-gray-400 flex-shrink-0">
-        💡 <strong>Tip:</strong> Drag files between clusters to reorganize. Click cluster names to rename. Ctrl+click files to select for split, then use &quot;Split to new cluster&quot;. Use &quot;Merge into&quot; to combine two clusters.
+        💡 <strong>Tip:</strong> Drag files between clusters to reorganize. Click cluster names to rename. Ctrl+click files to select them, then split those files into a new cluster or merge them into one markdown document. Use &quot;Merge into&quot; to combine two clusters without combining file contents.
+        {selectedForSplit.size >= 2 && selectionSpansClusters() && (
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = await onMergeDocuments([...selectedForSplit]);
+              if (ok) clearSplitSelection();
+            }}
+            className="ml-3 text-xs px-2 py-1 bg-primary-600 hover:bg-primary-700 rounded"
+          >
+            Merge all {selectedForSplit.size} selected into one document
+          </button>
+        )}
       </div>
 
       {/* Split layout: Clusters and File Preview */}
@@ -428,18 +454,32 @@ function ClusterView({
 
               {/* Files in Cluster */}
               <div className="space-y-2 max-h-60 overflow-auto">
-                {cluster.fileIndices.length > 1 && getSelectedInCluster(cluster).length > 0 && (
-                  <div className="flex gap-2 mb-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSplitCluster(clusterIndex, getSelectedInCluster(cluster));
-                        clearSplitSelection();
-                      }}
-                      className="text-xs px-2 py-1 bg-primary-600 hover:bg-primary-700 rounded"
-                    >
-                      Split {getSelectedInCluster(cluster).length} to new cluster
-                    </button>
+                {getSelectedInCluster(cluster).length > 0 && (
+                  <div className="flex gap-2 mb-2 flex-wrap">
+                    {cluster.fileIndices.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSplitCluster(clusterIndex, getSelectedInCluster(cluster));
+                          clearSplitSelection();
+                        }}
+                        className="text-xs px-2 py-1 bg-primary-600 hover:bg-primary-700 rounded"
+                      >
+                        Split {getSelectedInCluster(cluster).length} to new cluster
+                      </button>
+                    )}
+                    {getSelectedInClusterInOrder(cluster).length >= 2 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const ok = await onMergeDocuments(getSelectedInClusterInOrder(cluster));
+                          if (ok) clearSplitSelection();
+                        }}
+                        className="text-xs px-2 py-1 bg-primary-600 hover:bg-primary-700 rounded"
+                      >
+                        Merge {getSelectedInClusterInOrder(cluster).length} into one document
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setSelectedForSplit(prev => {
@@ -471,7 +511,7 @@ function ClusterView({
                       role="button"
                       tabIndex={0}
                       title={duplicateFlags[fileIndex] ? "High semantic overlap detected with another file in this cluster" : ""}
-                      aria-label={`File: ${file.name}. Drag to move, click to preview, Ctrl+click to select for split.`}
+                      aria-label={`File: ${file.name}. Drag to move, click to preview, Ctrl+click to select for split or document merge.`}
                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedFileIndex(fileIndex); } }}
                     >
                       <span className="text-gray-500">📄</span>

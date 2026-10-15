@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   organizeFiles: (outputFolder, clusters, files, options) => 
     ipcRenderer.invoke('organize-files', outputFolder, clusters, files, options),
   readDedupManifest: (folderPath) => ipcRenderer.invoke('read-dedup-manifest', folderPath),
+  saveMarkdownDialog: (defaultName) => ipcRenderer.invoke('save-markdown-dialog', defaultName),
+  mergeMarkdown: (files, outputPath, title) => ipcRenderer.invoke('merge-markdown', files, outputPath, title),
   
   // Logging & Debugging
   getLogPath: () => ipcRenderer.invoke('get-log-path'),

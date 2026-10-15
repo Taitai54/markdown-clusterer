@@ -30,7 +30,15 @@ markdown_clusters/
 
 - **Copy Mode**: Keeps original files intact, creates copies in cluster folders
 - **Move Mode**: Moves original files to cluster folders
-- **Inject Tags**: Adds cluster name as a tag in YAML frontmatter (Markdown files only)
+- **Inject Tags**: Adds the cluster name to YAML `tags` (`.md` / `.markdown` only)
+- **Inject cluster description**: Writes `cluster`, `clusterDescription`, and `topic_context` into frontmatter
+- **Namespace**: Optional subfolder under this output root; also stored in frontmatter when descriptions are injected
+- **Preserve relative paths**: Keeps the source folder layout inside each cluster folder
+- **Manifest**: Writes `index.json` at the output root
+- **Cluster index**: Writes `_index.md` inside each cluster folder
+- **Dedup**: Every organize updates `_dedup_manifest.json` so a later run can skip unchanged sources
+
+“Merge into” in the app combines two clusters into one folder group. “Merge into one document” is separate: Ctrl+click files and save them as a single markdown file. That file is not created inside this folder unless you pick this folder in the save dialog.
 
 ## Tips
 
