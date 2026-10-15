@@ -57,8 +57,18 @@ describe('FileList Virtualization', () => {
     fireEvent.click(screen.getByText('file2.md').closest('.file-card'), { ctrlKey: true });
     fireEvent.click(screen.getByText('file1.md').closest('.file-card'), { ctrlKey: true });
 
-    const mergeButton = screen.getByRole('button', { name: /Merge 2 into one document/i });
+    const mergeButton = screen.getByRole('button', { name: /Combine 2 into one file/i });
     fireEvent.click(mergeButton);
     expect(handleMerge).toHaveBeenCalledWith([1, 0]);
+  });
+
+  it('selects every file from the select all box, in list order', () => {
+    const handleRemove = vi.fn();
+    const handleMerge = vi.fn().mockResolvedValue(false);
+    render(<FileList files={mockFiles} onRemove={handleRemove} onMergeDocuments={handleMerge} />);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all files' }));
+    fireEvent.click(screen.getByRole('button', { name: /Combine 4 into one file/i }));
+    expect(handleMerge).toHaveBeenCalledWith([0, 1, 2, 3]);
   });
 });

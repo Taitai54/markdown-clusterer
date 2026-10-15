@@ -204,9 +204,9 @@ function ClusterView({
               checked={orgMode === 'copy'}
               onChange={() => setOrgMode('copy')}
               className="text-primary-500 bg-dark-100 border-gray-600 focus:ring-primary-600"
-              aria-label="Copy files to output folder"
+              aria-label="Copy files into group folders and keep the originals"
             />
-            Copy
+            Copy, keep originals
           </label>
           <label className="flex items-center gap-2 cursor-pointer text-sm">
             <input
@@ -216,9 +216,9 @@ function ClusterView({
               checked={orgMode === 'move'}
               onChange={() => setOrgMode('move')}
               className="text-primary-500 bg-dark-100 border-gray-600 focus:ring-primary-600"
-              aria-label="Move files to output folder"
+              aria-label="Move files out of their current folders into group folders"
             />
-            Move
+            Move out of current folders
           </label>
           <div className="w-px h-4 bg-gray-600 mx-1"></div>
             <label className="flex items-center gap-2 cursor-pointer text-sm" title="Adds the cluster name to the file's YAML frontmatter as a tag">
@@ -324,16 +324,18 @@ function ClusterView({
                 ? 'bg-green-600 cursor-default'
                 : 'bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 disabled:cursor-not-allowed'
             }`}
-            aria-label={organized ? 'Files organized' : 'Preview export'}
+            aria-label={organized ? 'Files organized' : 'Preview folder export'}
+            title="Shows where each separate file will be copied or moved before anything changes"
           >
-            {organized ? '✓ Organized!' : 'Preview export'}
+            {organized ? '✓ Organized!' : 'Preview folder export'}
           </button>
         </div>
       </div>
 
       {/* Instructions */}
       <div className="mb-4 p-3 bg-dark-100 rounded-lg text-sm text-gray-400 flex-shrink-0">
-        💡 <strong>Tip:</strong> Drag files between clusters to reorganize. Click cluster names to rename. Ctrl+click files to select them, then split those files into a new cluster or merge them into one markdown document. Use &quot;Merge into&quot; to combine two clusters without combining file contents.
+        <p><strong>Still on screen.</strong> Drag a file into another group, rename a group, or use <strong>Add group to…</strong> to put two groups together. Those actions do not write folders and do not stitch file text together.</p>
+        <p className="mt-1">Tick a file, or <strong>Select all</strong>, then <strong>Combine into one file</strong> when you want one new markdown document. Split sends the ticked files to a new group.</p>
         {selectedForSplit.size >= 2 && selectionSpansClusters() && (
           <button
             type="button"
@@ -341,9 +343,10 @@ function ClusterView({
               const ok = await onMergeDocuments([...selectedForSplit]);
               if (ok) clearSplitSelection();
             }}
-            className="ml-3 text-xs px-2 py-1 bg-primary-600 hover:bg-primary-700 rounded"
+            className="mt-2 text-xs px-2 py-1 bg-dark-300 hover:bg-dark-200 border border-gray-600 rounded"
+            title="Writes one new markdown file. Does not move the selected files."
           >
-            Merge all {selectedForSplit.size} selected into one document
+            Combine all {selectedForSplit.size} selected into one file
           </button>
         )}
       </div>
@@ -419,9 +422,10 @@ function ClusterView({
                       type="button"
                       onClick={() => setMergeMenuOpen(mergeMenuOpen === clusterIndex ? null : clusterIndex)}
                       className="text-xs px-2 py-1 bg-dark-200 hover:bg-dark-300 rounded border border-gray-600"
-                      aria-label="Merge this cluster into another"
+                      aria-label="Add this group's files to another group. Files stay separate."
+                      title="Puts these files into another group. Does not combine their text or write folders."
                     >
-                      Merge into…
+                      Add group to…
                     </button>
                     {mergeMenuOpen === clusterIndex && (
                       <div className="absolute right-0 top-full mt-1 py-1 bg-dark-200 border border-gray-600 rounded-lg shadow-lg z-10 min-w-[140px]">
@@ -454,6 +458,32 @@ function ClusterView({
 
               {/* Files in Cluster */}
               <div className="space-y-2 max-h-60 overflow-auto">
+                {cluster.fileIndices.length > 0 && (
+                  <label className="flex items-center gap-2 text-xs text-gray-400 px-1">
+                    <input
+                      type="checkbox"
+                      checked={cluster.fileIndices.every(i => selectedForSplit.has(i))}
+                      ref={(el) => {
+                        if (!el) return;
+                        const selectedCount = cluster.fileIndices.filter(i => selectedForSplit.has(i)).length;
+                        el.indeterminate = selectedCount > 0 && selectedCount < cluster.fileIndices.length;
+                      }}
+                      onChange={() => {
+                        const allSelected = cluster.fileIndices.every(i => selectedForSplit.has(i));
+                        setSelectedForSplit(prev => {
+                          const next = new Set(prev);
+                          cluster.fileIndices.forEach(i => {
+                            if (allSelected) next.delete(i);
+                            else next.add(i);
+                          });
+                          return next;
+                        });
+                      }}
+                      aria-label={`Select all files in ${cluster.name}`}
+                    />
+                    Select all
+                  </label>
+                )}
                 {getSelectedInCluster(cluster).length > 0 && (
                   <div className="flex gap-2 mb-2 flex-wrap">
                     {cluster.fileIndices.length > 1 && (
@@ -475,9 +505,10 @@ function ClusterView({
                           const ok = await onMergeDocuments(getSelectedInClusterInOrder(cluster));
                           if (ok) clearSplitSelection();
                         }}
-                        className="text-xs px-2 py-1 bg-primary-600 hover:bg-primary-700 rounded"
+                        className="text-xs px-2 py-1 bg-dark-300 hover:bg-dark-200 border border-gray-600 rounded"
+                        title="Writes one new markdown file. Does not move these files."
                       >
-                        Merge {getSelectedInClusterInOrder(cluster).length} into one document
+                        Combine {getSelectedInClusterInOrder(cluster).length} into one file
                       </button>
                     )}
                     <button
@@ -511,14 +542,27 @@ function ClusterView({
                       role="button"
                       tabIndex={0}
                       title={duplicateFlags[fileIndex] ? "High semantic overlap detected with another file in this cluster" : ""}
-                      aria-label={`File: ${file.name}. Drag to move, click to preview, Ctrl+click to select for split or document merge.`}
+                      aria-label={`File: ${file.name}. Drag to move, click to preview. Use the tick box to select for split or combining into one file.`}
                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedFileIndex(fileIndex); } }}
                     >
+                      <input
+                        type="checkbox"
+                        checked={isSelectedForSplit}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => {
+                          setSelectedForSplit(prev => {
+                            const next = new Set(prev);
+                            if (next.has(fileIndex)) next.delete(fileIndex);
+                            else next.add(fileIndex);
+                            return next;
+                          });
+                        }}
+                        aria-label={`Select ${file.name}`}
+                      />
                       <span className="text-gray-500">📄</span>
                       <span className="text-sm text-gray-300 truncate flex-1" title={file.name}>
                         {file.name}
                       </span>
-                      {isSelectedForSplit && <span className="text-amber-400 text-xs">✓</span>}
                     </div>
                   );
                 })}

@@ -8,6 +8,7 @@ import FileList from './components/FileList';
 import ClusterView from './components/ClusterView';
 import Header from './components/Header';
 import ProgressModal from './components/ProgressModal';
+import WorkflowSteps from './components/WorkflowSteps';
 
 const initialState = {
   apiKeySet: false,
@@ -626,7 +627,8 @@ function App() {
       </section></div>}
       {notice && <div role="status" className="px-6 py-2 text-sm bg-blue-900/30 text-blue-200 max-h-24 overflow-auto">{notice}</div>}
       {preview && <ExportPreview plan={preview} onCancel={()=>setPreview(null)} onConfirm={commitExport}/>}
-      <main className="flex-1 overflow-hidden p-6">
+      <main className="flex-1 overflow-hidden p-6 flex flex-col">
+        <WorkflowSteps step={files.length === 0 ? 'import' : clusters.length === 0 ? 'group' : 'folders'} />
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-500/50 rounded-lg text-red-300">
             {error}
@@ -639,6 +641,7 @@ function App() {
           </div>
         )}
 
+        <div className="flex-1 min-h-0 overflow-hidden">
         {files.length === 0 ? (
           <FileDropZone
             onSelectFolder={handleSelectFolder}
@@ -719,8 +722,9 @@ function App() {
                   onClick={handleCluster}
                   disabled={!apiKeySet || files.length < 2}
                   className="px-6 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
+                  title="Groups similar files on screen. Does not move or combine them."
                 >
-                  🤖 Cluster with AI
+                  Group into topic folders
                 </button>
               </div>
             </div>
@@ -770,6 +774,7 @@ function App() {
             onRecluster={() => dispatch({ type: 'SET_CLUSTERS', payload: { clusters: [], embeddings: [] } })}
           />
         )}
+        </div>
       </main>
 
       {showApiModal && (

@@ -74,7 +74,7 @@ See [Projects, categories and reversible export](PRODUCT_WORKFLOWS.md). The rend
 
 ## Document merge
 
-**Merge into** groups files into one cluster. **Merge into one document** writes one new markdown file. Sources are left where they are.
+**Add group to…** puts one cluster's files into another cluster. **Combine into one file** writes one new markdown file. Sources are left where they are. **Preview folder export** is the action that copies or moves each file into a group folder.
 
 Ctrl+click (or Cmd+click) selects files. On the file list, that selection is only for this merge. In Cluster View, the same selection also feeds Split. Section order is the order the files were selected. If the selection spans more than one cluster, the tip bar offers to merge every selected file.
 

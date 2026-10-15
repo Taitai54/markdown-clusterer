@@ -47,6 +47,14 @@ const FileCard = memo(function FileCard({ file, index, onRemove, isExpanded, onT
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3 min-w-0">
+          <input
+            type="checkbox"
+            checked={!!isSelected}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => onToggleSelect?.(index)}
+            aria-label={`Select ${file.name} to combine into one file`}
+            className="mt-1"
+          />
           <div className="w-10 h-10 bg-blue-900/30 rounded-lg flex items-center justify-center text-lg flex-shrink-0">
             📝
           </div>
@@ -164,20 +172,21 @@ function FileList({ files, onRemove, onMergeDocuments }) {
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col" role="list" aria-label="Loaded files">
-      {selectedOrder.length > 0 && (
-        <div className="flex items-center gap-2 mb-2 flex-shrink-0">
-          <button
-            type="button"
-            onClick={async () => {
-              if (selectedOrder.length < 2 || !onMergeDocuments) return;
-              const ok = await onMergeDocuments(selectedOrder);
-              if (ok) setSelectedOrder([]);
-            }}
-            disabled={selectedOrder.length < 2}
-            className="text-sm px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg"
-          >
-            Merge {selectedOrder.length} into one document
-          </button>
+      <div className="flex flex-wrap items-center gap-2 mb-2 flex-shrink-0">
+        <button
+          type="button"
+          onClick={async () => {
+            if (selectedOrder.length < 2 || !onMergeDocuments) return;
+            const ok = await onMergeDocuments(selectedOrder);
+            if (ok) setSelectedOrder([]);
+          }}
+          disabled={selectedOrder.length < 2}
+          className="text-sm px-3 py-1.5 bg-dark-300 hover:bg-dark-100 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed rounded-lg border border-gray-600"
+          title="Writes one new markdown file. Does not move the selected files."
+        >
+          {selectedOrder.length >= 2 ? `Combine ${selectedOrder.length} into one file` : 'Combine into one file'}
+        </button>
+        {selectedOrder.length > 0 && (
           <button
             type="button"
             onClick={() => setSelectedOrder([])}
@@ -185,9 +194,23 @@ function FileList({ files, onRemove, onMergeDocuments }) {
           >
             Clear selection
           </button>
-          <span className="text-xs text-gray-500">Ctrl+click files to choose what gets merged, in the order you select them.</span>
-        </div>
-      )}
+        )}
+        <label className="flex items-center gap-2 text-sm text-gray-300">
+          <input
+            type="checkbox"
+            checked={files.length > 0 && selectedOrder.length === files.length}
+            ref={(el) => {
+              if (el) el.indeterminate = selectedOrder.length > 0 && selectedOrder.length < files.length;
+            }}
+            onChange={() => {
+              setSelectedOrder(selectedOrder.length === files.length ? [] : files.map((_, index) => index));
+            }}
+            aria-label="Select all files"
+          />
+          Select all
+        </label>
+        <span className="text-xs text-gray-500">Tick files, or Select all, in the order you want the sections. This saves a new file and leaves the originals where they are.</span>
+      </div>
       <div className="flex-1 overflow-hidden">
       <AutoSizer renderProp={({ height, width }) => {
           if (!width || !height) return null;

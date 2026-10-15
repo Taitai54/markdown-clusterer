@@ -38,7 +38,7 @@ markdown_clusters/
 - **Cluster index**: Writes `_index.md` inside each cluster folder
 - **Dedup**: Every organize updates `_dedup_manifest.json` so a later run can skip unchanged sources
 
-“Merge into” in the app combines two clusters into one folder group. “Merge into one document” is separate: Ctrl+click files and save them as a single markdown file. That file is not created inside this folder unless you pick this folder in the save dialog.
+**Add group to…** puts two groups together. **Combine into one file** writes a single markdown document. **Preview folder export** is what copies or moves each file into a folder here.
 
 ## Tips
 
